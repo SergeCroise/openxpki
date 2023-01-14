@@ -1,11 +1,14 @@
-# OpenXPKI::Client::UI::Source
-# class to wrap content from files on disk into the required json structure
-
 package OpenXPKI::Client::UI::Source;
+use Moose;
+extends 'OpenXPKI::Client::UI::Result';
 
-=head1 OpenXPKI::Client::UI::Source
+=head1 NAME
 
-Load content from disk and output it. The path to the content files is
+OpenXPKI::Client::UI::Source - load content from disk and output it.
+
+=head1 DESCRIPTION
+
+The path to the content files is
 created from the predefined source path plus the realm name. If you want
 to reuse content for multiple realms, create a folder _global which is
 always checked if there is no dedicated folder for the current realm.
@@ -15,11 +18,8 @@ must not contain characters other then I<a-zA-Z0-9_->
 
 =cut
 
-use Moose;
 use JSON;
 use Data::Dumper;
-
-extends 'OpenXPKI::Client::UI::Result';
 
 has _basepath => (
     is => 'rw',
@@ -27,12 +27,6 @@ has _basepath => (
     builder => '_init_path',
     lazy => 1,
 );
-
-sub BUILD {
-    my $self = shift;
-    $self->_page ({'label' => ''});
-}
-
 
 =head2 init_html
 
@@ -55,7 +49,7 @@ sub init_html {
 
     $self->logger()->debug('Got content ' . join("",@content));
 
-    $self->add_section({
+    $self->main->add_section({
         type => 'text',
         content => {
             label => '',
@@ -90,7 +84,7 @@ sub init_json {
 
     my $json = decode_json(join("",@content));
 
-    $self->_result()->{_raw} = $json;
+    $self->confined_response($json);
     return $self;
 
 }
@@ -162,8 +156,8 @@ sub _notfound {
 
     my $self = shift;
 
-    $self->set_status('No results','error');
-    $self->add_section({
+    $self->status->error('No results');
+    $self->main->add_section({
         type => 'text',
         content => {
             label => 'Not found!',
@@ -174,7 +168,6 @@ sub _notfound {
     return $self;
 }
 
-
-1;
+__PACKAGE__->meta->make_immutable;
 
 __END__;

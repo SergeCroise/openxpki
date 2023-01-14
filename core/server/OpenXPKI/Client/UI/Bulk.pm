@@ -1,10 +1,6 @@
-# OpenXPKI::Client::UI::Bulk
-# Written 2013 by Oliver Welter
-# (C) Copyright 2013 by The OpenXPKI Project
-
 package OpenXPKI::Client::UI::Bulk;
-
 use Moose;
+
 use Template;
 use Data::Dumper;
 use Date::Parse;
@@ -23,10 +19,10 @@ sub init_index {
     my $self = shift;
     my $args = shift;
 
-    $self->_page({
+    $self->set_page(
         label => 'I18N_OPENXPKI_UI_WORKFLOW_BULK_TITLE',
         description => 'I18N_OPENXPKI_UI_WORKFLOW_BULK_DESCRIPTION',
-    });
+    );
 
     # Spec holds additional search attributes and list definition
     my @bulklist = @{$self->_session->param('bulk')->{default}};
@@ -34,12 +30,16 @@ sub init_index {
     BULKITEM:
     foreach my $bulk (@bulklist) {
 
-        my @fields = ({
+        my $form = $self->main->add_form(
+            action => 'bulk!result',
+            label => $bulk->{label},
+            description => $bulk->{description},
+            submit_label => 'I18N_OPENXPKI_UI_WORKFLOW_SEARCH_SUBMIT_LABEL',
+        )->add_field(
             name => 'wf_creator',
-              label => 'I18N_OPENXPKI_UI_WORKFLOW_SEARCH_CREATOR_LABEL',
-              type => 'text',
-              is_optional => 1,
-            }
+            label => 'I18N_OPENXPKI_UI_WORKFLOW_SEARCH_CREATOR_LABEL',
+            type => 'text',
+            is_optional => 1,
         );
 
         if ($bulk->{attributes}) {
@@ -48,34 +48,23 @@ sub init_index {
                 push @attrib, { value => $item->{key}, label=> $item->{label} };
 
             }
-            push @fields, {
+            $form->add_field(
                 name => 'attributes',
                 label => 'Metadata',
                 'keys' => \@attrib,
                 type => 'text',
                 is_optional => 1,
-                'clonable' => 1
-            };
+                'clonable' => 1,
+            );
         }
 
         my $id = $self->__generate_uid();
         $self->_client->session()->param('bulk_'.$id, $bulk );
-        push @fields, {
+        $form->add_field(
             name => 'formid',
             type => 'hidden',
-            value => $id
-        };
-
-        $self->add_section({
-            type => 'form',
-            action => 'bulk!result',
-            content => {
-                label => $bulk->{label},
-                description => $bulk->{description},
-                submit_label => 'I18N_OPENXPKI_UI_WORKFLOW_SEARCH_SUBMIT_LABEL',
-                fields => \@fields
-            }
-        });
+            value => $id,
+        );
     } # end bulkitem
 
     return $self;
@@ -91,7 +80,7 @@ sub action_result {
     # Read query pattern and list info from persisted data
     my $spec = $self->_client->session()->param('bulk_'.$queryid);
     if (!$spec) {
-        return $self->redirect('bulk!index');
+        return $self->redirect->to('bulk!index');
     }
 
     my $query = {};
@@ -145,7 +134,7 @@ sub action_result {
 
     # No results founds
     if (!$result_count) {
-        $self->set_status('I18N_OPENXPKI_UI_SEARCH_HAS_NO_MATCHES','error');
+        $self->status->error('I18N_OPENXPKI_UI_SEARCH_HAS_NO_MATCHES');
         return $self->init_index();
     }
 
@@ -186,8 +175,7 @@ sub action_result {
         page => 'bulk!index!' . $self->__generate_uid(),
     };
 
-    $self->_client->session()->param('query_wfl_'.$queryid, {
-        'id' => $queryid,
+    $self->__save_query($queryid => {
         'type' => 'bulk',
         'count' => $result_count,
         'query' => $query,
@@ -202,12 +190,10 @@ sub action_result {
         'button' => \@buttons,
     });
 
-    $self->redirect( 'bulk!result!id!'.$queryid  );
+    $self->redirect->to('bulk!result!id!'.$queryid);
 
     return $self;
 
 }
 
-1;
-
-
+__PACKAGE__->meta->make_immutable;

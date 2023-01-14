@@ -1,11 +1,10 @@
 package OpenXPKI::Crypt::PKCS7;
 
-use strict;
-use warnings;
-use English;
-use Digest::SHA qw(sha1_base64 sha1_hex);
-use MIME::Base64;
 use Moose;
+with 'OpenXPKI::Role::IssuerSerial';
+
+use English;
+use MIME::Base64;
 use Convert::ASN1 ':tag';
 use OpenXPKI::Debug;
 use OpenXPKI::Crypt::DN;
@@ -15,8 +14,6 @@ use Moose::Exporter;
 Moose::Exporter->setup_import_methods(
     as_is => ['decode_tag','encode_tag','find_oid']
 );
-
-with 'OpenXPKI::Role::IssuerSerial';
 
 our %oids = (
     # pkcs7 data types
@@ -130,7 +127,7 @@ our $schema = "
             certSet         [0] IMPLICIT ExtendedCertificatesAndCertificates,
             certSequence    [2] IMPLICIT Certificates
         },
-        -- crls
+        crls                [1] IMPLICIT CertificateRevocationLists OPTIONAL,
         signerInfos     SignerInfos
     }
 
@@ -160,11 +157,7 @@ our $schema = "
 
     Certificates ::= SEQUENCE OF Certificate
 
-    CertificateRevocationLists ::= SET OF CertificateList
-
-    CertificateList ::= SEQUENCE OF Certificate -- This may be defined incorrectly
-
-    CRLSequence ::= SEQUENCE OF CertificateList
+    CertificateRevocationLists ::= SET OF ANY
 
     Certificate ::= ANY
 
@@ -607,7 +600,6 @@ sub encode_tag {
     return asn_encode_tag($class).asn_encode_length(length($value)).$value;
 }
 
-
-1;
+__PACKAGE__->meta->make_immutable;
 
 __END__;

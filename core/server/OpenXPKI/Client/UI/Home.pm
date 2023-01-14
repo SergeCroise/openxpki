@@ -1,19 +1,16 @@
-# OpenXPKI::Client::UI::Home
-# Written 2013 by Oliver Welter
-# (C) Copyright 2013 by The OpenXPKI Project
-
 package OpenXPKI::Client::UI::Home;
-
 use Moose;
+
+extends 'OpenXPKI::Client::UI::Result';
+
 use Template;
 use Data::Dumper;
 
-extends 'OpenXPKI::Client::UI::Result';
 
 sub BUILD {
 
     my $self = shift;
-    $self->_page ({'label' => 'I18N_OPENXPKI_UI_HOME_WELCOME_HEAD'});
+    $self->page->label('I18N_OPENXPKI_UI_HOME_WELCOME_HEAD');
 }
 
 sub init_welcome {
@@ -31,13 +28,13 @@ sub init_welcome {
 
     if ($redirect) {
         $self->logger()->debug('Found redirect - redirecting user to ' . $redirect);
-        $self->redirect($redirect);
+        $self->redirect->to($redirect);
     } else {
         # check if there are custom landmarks for this user
         my $landmark = $self->_client->session()->param('landmark');
         if ($landmark && $landmark->{welcome}) {
             $self->logger()->debug('Found welcome landmark - redirecting user to ' . $landmark->{welcome});
-            $self->redirect($landmark->{welcome});
+            $self->redirect->to($landmark->{welcome});
         } else {
             $self->init_index();
         }
@@ -51,7 +48,7 @@ sub init_index {
     my $self = shift;
     my $args = shift;
 
-    $self->add_section({
+    $self->main->add_section({
         type => 'text',
         content => {
             label => '',
@@ -71,8 +68,8 @@ Redirect to workflow!task
 sub init_task {
 
     my $self = shift;
-    $self->redirect('workflow!task');
+    $self->redirect->to('workflow!task');
 
 }
 
-1;
+__PACKAGE__->meta->make_immutable;

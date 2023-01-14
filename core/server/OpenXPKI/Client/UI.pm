@@ -7,12 +7,14 @@ use English;
 use Encode;
 use Data::Dumper;
 use MIME::Base64;
+use Module::Load ();
 
 # CPAN modules
 use CGI::Session;
 use URI::Escape;
 use Log::Log4perl::MDC;
-use Crypt::JWT qw(encode_jwt decode_jwt);
+use Crypt::JWT qw( encode_jwt decode_jwt );
+use Feature::Compat::Try;
 
 # Project modules
 use OpenXPKI::Template;
@@ -26,6 +28,13 @@ has 'session' => (
     required => 1,
     is => 'rw',
     isa => 'CGI::Session|Undef',
+);
+
+# Response structure (JSON or some raw bytes) and HTTP headers
+has 'resp' => (
+    is => 'rw',
+    isa => 'OpenXPKI::Client::UI::Response',
+    required => 1,
 );
 
 # the OXI::Client object
@@ -58,14 +67,6 @@ has '_auth' => (
     isa => 'Ref',
     init_arg => 'auth',
     predicate => 'has_auth',
-);
-
-# Hold warnings from init
-has _status => (
-    is => 'rw',
-    isa => 'HashRef|Undef',
-    lazy => 1,
-    default => undef
 );
 
 =head2 _init_backend
@@ -106,7 +107,7 @@ sub _init_backend {
                 # The session has gone - start a new one - might happen if the gui
                 # was idle too long or the server was flushed
                 $client->init_session({ SESSION_ID => undef });
-                $self->_status({ level => 'warn', message => i18nGettext('I18N_OPENXPKI_UI_BACKEND_SESSION_GONE')});
+                $self->resp->status->warn(i18nGettext('I18N_OPENXPKI_UI_BACKEND_SESSION_GONE'));
             } else {
                 $self->logger()->error('Error creating backend session: ' . $eval_err->{message});
                 $self->logger()->trace($eval_err);
@@ -159,16 +160,20 @@ sub handle_request {
     my $cgi = $req->cgi();
 
     my $page = $req->param('page') || '';
-    my $action = $self->__get_action( $req ) || '';
+    my $action = $self->__get_action($req);
 
     $self->logger()->debug('Incoming request: ' . join(', ', $page ? "page '$page'" : (), $action ? "action '$action'" : ()));
 
     # Check for goto redirection first
     if ($action =~ /^redirect!(.+)/  || $page =~ /^redirect!(.+)/) {
         my $goto = $1;
-        my $result = OpenXPKI::Client::UI::Result->new({ client => $self, req => $req });
+        my $result = OpenXPKI::Client::UI::Result->new(
+            client => $self,
+            req => $req,
+            resp => $self->resp,
+        );
         $self->logger()->debug("Send redirect to $goto");
-        $result->redirect( $goto );
+        $result->redirect->to($goto);
         return $result->render();
     }
 
@@ -189,8 +194,12 @@ sub handle_request {
         # now perform the redirect if set
         if ($redirectTo) {
             $self->logger()->debug("External redirect on logout to " . $redirectTo);
-            my $result = OpenXPKI::Client::UI::Result->new({ client => $self, req => $req });
-            $result->redirect( $redirectTo );
+            my $result = OpenXPKI::Client::UI::Result->new(
+                client => $self,
+                req => $req,
+                resp => $self->resp,
+            );
+            $result->redirect->to($redirectTo);
             return $result->render();
         }
 
@@ -208,21 +217,31 @@ sub handle_request {
     }
 
     if ( $reply->{SERVICE_MSG} eq 'ERROR' ) {
-        my $result = OpenXPKI::Client::UI::Result->new({ client => $self, req => $req });
+        my $result = OpenXPKI::Client::UI::Result->new(
+            client => $self,
+            req => $req,
+            resp => $self->resp,
+        );
         $self->logger()->debug("Got error from server");
-        return $result->set_status_from_error_reply( $reply );
+        $result->set_status_from_error_reply($reply);
+        return $result->render;
     }
 
 
     # Call to bootstrap components
     if ($page =~ /^bootstrap!(.+)/) {
-        my $result = OpenXPKI::Client::UI::Bootstrap->new({ client => $self, req => $req });
-        return $result->init_structure( )->render();
+        my $result = OpenXPKI::Client::UI::Bootstrap->new(
+            client => $self,
+            req => $req,
+            resp => $self->resp,
+        );
+        $result->init_structure;
+        return $result->render;
     }
 
     # Only handle requests if we have an open channel
     if ( $reply->{SERVICE_MSG} eq 'SERVICE_READY' ) {
-        return $self->handle_page( { req => $req } );
+        return $self->handle_page( { req => $req, load_action => 1 } );
     }
 
     # if the backend session logged out but did not terminate
@@ -249,64 +268,96 @@ sub __load_class {
     my $self = shift;
     my $call = shift;
     my $req = shift;
+    my $is_action = shift;
 
-    $self->logger()->debug("Incoming call to load_class $call");
+    $self->logger->debug("Trying to load class for call: $call");
 
-    my ($class, $method, $param) = ($call =~ /\A (\w+)\!? (\w+)? \!?(.*) \z/xms);
+    my ($class, $remainder) = ($call =~ /\A (\w+)\!? (.*) \z/xms);
+    my ($method, $param_raw);
 
     if (!$class) {
-        $self->logger()->error("Failed to parse page load string $call");
-        return (undef, undef);
+        $self->logger->error("Failed to parse page load string $call");
+        return;
     }
 
-    my $extra = {};
+    my $params = {};
     # the request is encoded in an encrypted jwt structure
     if ($class eq 'encrypted') {
         # TODO - consolidate with JWT code from Request.pm
         my $jwt_key = $self->session->param('jwt_encryption_key');
         unless ($jwt_key) {
             $self->logger->debug("JWT encrypted request but client session contains no decryption key");
-            return (undef, undef);
+            return;
         }
         # as the token has non-word characters the above regex does not contain the full payload
         # we therefore read the payload directly from call stripping the class name
-        my $decoded = decode_jwt(token => substr($call,10), key => $jwt_key);
+        my $decoded = $req->_decrypt_jwt($remainder);
         if ($decoded->{page}) {
-            $self->logger()->debug("Encrypted request with page " . $decoded->{page});
+            $self->logger->debug("Encrypted request with page " . $decoded->{page});
             ($class, $method) = ($decoded->{page} =~ /\A (\w+)\!? (\w+)? \z/xms);
         } else {
             $class = $decoded->{class};
             $method = $decoded->{method};
         }
         my %secure = map { $_ =~ m{\A(page|class|method)\z} ? () : ($_ => $decoded->{$_})  } keys %$decoded;
-        $self->logger()->debug("Encrypted request to $class / $method");
-        $self->logger()->trace("Encrypted request secure params " . Dumper \%secure ) if ($self->logger->is_trace && (keys %secure));
-        $extra->{__secure} = { %secure, (__jwt_key => $jwt_key ) };
+        $self->logger->debug("Encrypted request to $class / $method");
+        $self->logger->trace("Encrypted request secure params " . Dumper \%secure ) if ($self->logger->is_trace && (keys %secure));
+        $params->{__secure} = { %secure, (__jwt_key => $jwt_key ) };
     }
-    elsif ($param) {
-        my @extra = split /!/, $param;
-        while (my $key = shift @extra) {
-            my $val = shift @extra // '';
-            $extra->{$key} = Encode::decode("UTF-8", uri_unescape($val));
+    else {
+        ($method, $param_raw) = ($remainder =~ /\A (\w+)? \!?(.*) \z/xms);
+        if ($param_raw) {
+            my @parts = split /!/, $param_raw;
+            while (my $key = shift @parts) {
+                my $val = shift @parts // '';
+                $params->{$key} = Encode::decode("UTF-8", uri_unescape($val));
+            }
+            $self->logger->trace("Found extra params: " . Dumper $params) if $self->logger->is_trace;
         }
-        $self->logger()->trace("Found extra params " . Dumper $extra ) if $self->logger->is_trace;
     }
 
-    $method  = 'index' if (!$method );
+    $method  = 'index' unless $method;
 
-    $self->logger()->debug("Loading handler class $class");
-
-    $class = "OpenXPKI::Client::UI::".ucfirst($class);
-    eval "use $class;1";
-    if ($EVAL_ERROR) {
-        $self->logger()->error("Failed loading handler class $class: $EVAL_ERROR");
-        return (undef, undef);
+    my @variants;
+    # action!...
+    if ($is_action) {
+        @variants = (
+            sprintf("OpenXPKI::Client::UI::%s::Action::%s", ucfirst($class), ucfirst($method)),
+            sprintf("OpenXPKI::Client::UI::%s::Action", ucfirst($class)),
+            sprintf("OpenXPKI::Client::UI::%s", ucfirst($class)),
+        );
+    }
+    # init!...
+    else {
+        @variants = (
+            sprintf("OpenXPKI::Client::UI::%s::%s", ucfirst($class), ucfirst($method)),
+            sprintf("OpenXPKI::Client::UI::%s::Init", ucfirst($class)),
+            sprintf("OpenXPKI::Client::UI::%s", ucfirst($class)),
+        );
     }
 
-    my $result = $class->new({ client => $self, req => $req, extra => $extra });
+    for my $pkg (@variants) {
+        try {
+            Module::Load::load($pkg);
+            $self->logger->debug("Handler class '$pkg' loaded");
+        }
+        catch ($err) {
+            next;
+        }
+        die "Package $pkg must inherit from OpenXPKI::Client::UI::Result" unless $pkg->isa('OpenXPKI::Client::UI::Result');
 
-    return ($result, $method);
+        my $obj = $pkg->new(
+            client => $self,
+            req => $req,
+            extra => $params,
+            resp => $self->resp,
+        );
 
+        return ($obj, $method);
+    }
+
+    $self->logger->error("Could not find any handler class for '".ucfirst($class)."'");
+    return;
 }
 
 
@@ -315,7 +366,7 @@ sub __load_class {
 Expect a reference to the cgi object. Returns the value of
 cgi->param('action') if set and the XSRFtoken is valid. If the token is
 invalid, returns undef and sets the global status to error. If parameter
-is empty or not set returns undef.
+is empty or not set returns an empty string.
 
 =cut
 
@@ -340,10 +391,10 @@ sub __get_action {
         } else {
 
             $self->logger()->debug("Request with invalid rtoken ($rtoken_request != $rtoken_session)!");
-            $self->_status({ level => 'error', 'message' => i18nGettext('I18N_OPENXPKI_UI_REQUEST_TOKEN_NOT_VALID')});
+            $self->resp->status->error(i18nGettext('I18N_OPENXPKI_UI_REQUEST_TOKEN_NOT_VALID'));
         }
     }
-    return;
+    return '';
 
 }
 
@@ -369,43 +420,41 @@ sub handle_page {
 
     my $self = shift;
     my $args = shift;
-    my $method_args = shift || {};
 
     my $req = $args->{req};
-    my $cgi = $req->cgi();
-
-    # set action and page - args always wins about cgi
-
-    my $result;
-    my $action = '';
-    # action is only valid explicit or within a post request
-    if (defined $args->{action}) {
-       $action = $args->{action};
-    } else {
-        $action = $self->__get_action( $req );
-    }
+    # Set action or page - args always wins over CGI.
+    # Action is only valid within a post request
+    my $action = $args->{load_action} ? $self->__get_action($req) : '';
+    my $page = (defined $args->{page} ? $args->{page} : $req->param('page')) || 'home';
+    my @page_method_args;
 
     $self->logger()->trace('Handle page: ' . Dumper { map { $_ => $args->{$_} } grep { $_ ne 'req' } keys %$args } ) if $self->logger->is_trace;
 
-    my $page = (defined $args->{page} ? $args->{page} : $req->param('page')) || 'home';
-
+    my $obj;
+    my $redirected_from;
     if ($action) {
         $self->logger()->info('handle action ' . $action);
 
         my $method;
-        ($result, $method) = $self->__load_class( $action, $req );
+        ($obj, $method) = $self->__load_class($action, $req, 1);
 
-        if ($result) {
+        if ($obj) {
             $method  = "action_$method";
-            $self->logger()->debug("Method is $method");
-            $result->$method( $method_args );
+            $self->logger->debug("Calling method: $method()");
+            $obj->$method();
+            # Follow an internal redirect to an init_* method
+            if (my $target = $obj->internal_redirect_target) {
+                ($page, @page_method_args) = @$target;
+                $redirected_from = $obj;
+                $self->logger->trace("Internal redirect to: $page") if $self->logger->is_trace;
+            }
         } else {
-            $self->_status({ level => 'error', 'message' => i18nGettext('I18N_OPENXPKI_UI_ACTION_NOT_FOUND')});
+            $self->resp->status->error(i18nGettext('I18N_OPENXPKI_UI_ACTION_NOT_FOUND'));
         }
     }
 
-    # Render a page only if there is no action result
-    if (!$result) {
+    # Render a page only if there is no action or object instantiation failed
+    if (not $obj or $redirected_from) {
 
         # Handling of special page requests - to be replaced by hash if it grows
         if ($page eq 'welcome') {
@@ -414,25 +463,30 @@ sub handle_page {
 
         my $method;
         if ($page) {
-            ($result, $method) = $self->__load_class( $page, $req );
+            ($obj, $method) = $self->__load_class($page, $req);
         }
 
-        if (!$result) {
+        if (!$obj) {
             $self->logger()->error("Failed loading page class");
-            $result = OpenXPKI::Client::UI::Bootstrap->new({ client => $self,  cgi => $cgi });
-            $result->init_error();
-            $result->set_status(i18nGettext('I18N_OPENXPKI_UI_PAGE_NOT_FOUND'),'error');
+            $obj = OpenXPKI::Client::UI::Bootstrap->new(
+                client => $self,
+                req => $req,
+                resp => $self->resp,
+            );
+            $obj->init_error();
+            $obj->status->error(i18nGettext('I18N_OPENXPKI_UI_PAGE_NOT_FOUND'));
 
         } else {
             $method  = "init_$method";
-            $self->logger()->debug("Method is $method");
-            $result->$method( $method_args );
+            $self->logger->debug("Calling method: $method()");
+            $obj->status($redirected_from->status) if $redirected_from;
+            $obj->$method(@page_method_args);
         }
     }
 
     Log::Log4perl::MDC->put('wfid', undef);
 
-    return $result->render();
+    return $obj->render();
 
 }
 
@@ -445,32 +499,37 @@ sub handle_login {
     my $cgi = $req->cgi();
     my $reply = $args->{reply};
 
-    $reply = $self->backend()->send_receive_service_msg('PING') if (!$reply);
+    $reply = $self->backend->send_receive_service_msg('PING') if (!$reply);
 
     my $status = $reply->{SERVICE_MSG};
 
-    my $result = OpenXPKI::Client::UI::Login->new({ client => $self, req => $req });
+    my $result = OpenXPKI::Client::UI::Login->new(
+        client => $self,
+        req => $req,
+        resp => $self->resp,
+    );
 
     # Login works in three steps realm -> auth stack -> credentials
 
-    my $session = $self->session();
+    my $session = $self->session;
     my $page = $req->param('page') || '';
 
     # this is the incoming logout action
     if ($page eq 'logout') {
-        $result->redirect( { goto => 'login!logout' } );
-        return $result->render();
+        $result->redirect->to('login!logout');
+        return $result->render;
     }
 
     # this is the redirect to the "you have been logged out page"
     if ($page eq 'login!logout') {
-        return $result->init_logout()->render();
+        $result->init_logout;
+        return $result->render;
     }
 
     # action is only valid within a post request
-    my $action = $self->__get_action( $req ) || '';
+    my $action = $self->__get_action($req);
 
-    $self->logger()->info('not logged in - doing auth - page is '.$page.' - action is ' . $action);
+    $self->logger->info('not logged in - doing auth - page is '.$page.' - action is ' . $action);
 
     # Special handling for pki_realm and stack params
     if ($action eq 'login!realm' && $req->param('pki_realm')) {
@@ -508,12 +567,12 @@ sub handle_login {
         if (my $loginpage = $self->_config()->{loginpage}) {
 
             # internal call to handle_page
-            return $self->handle_page({ action => '', page => $loginpage, req => $req });
+            return $self->handle_page({ page => $loginpage, req => $req });
 
         } elsif (my $loginurl = $self->_config()->{loginurl}) {
 
             $self->logger()->debug("Redirect to external login page " . $loginurl );
-            $result->redirect( { goto => $loginurl, type => 'external' } );
+            $result->redirect->external($loginurl);
             return $result->render();
             # Do a real exit to skip the error handling of the script body
             exit;
@@ -521,7 +580,7 @@ sub handle_login {
         } elsif ( $cgi->http('HTTP_X-OPENXPKI-Client') ) {
 
             # Session is gone but we are still in the ember application
-            $result->redirect('login');
+            $result->redirect->to('login');
 
         } else {
 
@@ -535,7 +594,7 @@ sub handle_login {
             }
             $url .= '/#/openxpki/login';
             $self->logger()->debug('Redirect to login page: ' . $url);
-            $result->redirect($url);
+            $result->redirect->to($url);
         }
     }
 
@@ -635,7 +694,7 @@ sub handle_login {
                     { baseurl => $session->param('baseurl') } );
 
                 $self->logger()->debug("No auth data in environment - redirect found $loginurl");
-                $result->redirect( { goto => $loginurl, type => 'external' } );
+                $result->redirect->external($loginurl);
                 return $result->render();
 
             # bad luck - something seems to be really wrong
@@ -676,7 +735,7 @@ sub handle_login {
 
             # form send / credentials are passed (works with an empty form too...)
 
-            if (($self->__get_action($req) || '') eq 'login!password') {
+            if (($self->__get_action($req)) eq 'login!password') {
                 $self->logger()->debug('Seems to be an auth try - validating');
                 ##FIXME - Input validation
 
@@ -740,15 +799,10 @@ sub handle_login {
 
             Log::Log4perl::MDC->put('sid', substr($session->id,0,4));
 
-            # FIXME Remove direct access to $main::cookie and main::encrypt_cookie
-            if ($main::cookie) {
-                $main::cookie->{'-value'} = main::encrypt_cookie($session->id);
-                push @main::header, ('-cookie', $cgi->cookie( $main::cookie ));
-            }
-            $self->logger->trace('CGI Header ' . Dumper \@main::header ) if $self->logger->is_trace;
+            $self->resp->session_cookie->id($session->id);
 
             if ($auth_info->{login}) {
-                $result->redirect( $auth_info->{login} );
+                $result->redirect->to($auth_info->{login});
             } else {
                 $result->init_index();
             }
@@ -763,7 +817,7 @@ sub handle_login {
         # Failure here is likely a wrong password
 
         if ($reply->{'ERROR'} && $reply->{'ERROR'}->{CLASS} eq 'OpenXPKI::Exception::Authentication') {
-            $result->set_status(i18nGettext( $reply->{'ERROR'}->{LABEL} ),'error');
+            $result->status->error(i18nGettext( $reply->{'ERROR'}->{LABEL} ));
         } else {
             $result->set_status_from_error_reply($reply);
         }
@@ -825,7 +879,7 @@ sub _recreate_frontend_session() {
 
     # menu
     my $reply = $self->backend->send_receive_command_msg( 'get_menu' );
-    $self->_set_menu($session, $reply->{PARAMS}) if ref $reply->{PARAMS} eq 'HASH';
+    $self->_set_menu($session, $reply->{PARAMS}) if $reply->{PARAMS};
 
     $session->flush;
 
@@ -838,7 +892,7 @@ sub _set_menu {
 
     $self->logger->trace('Menu ' . Dumper $menu) if $self->logger->is_trace;
 
-    $session->param('menu', $menu->{main});
+    $session->param('menu_items', $menu->{main} || []);
 
     # persist the optional parts of the menu hash (landmark, tasklist, search attribs)
     $session->param('landmark', $menu->{landmark} || {});
@@ -958,21 +1012,17 @@ sub logout_session {
 
     $self->logger->info("session logout");
 
-    my $session = $self->session();
-    $self->backend()->logout();
-    $self->session()->delete();
-    $self->session()->flush();
-    $self->session( $self->session()->new() );
+    my $session = $self->session;
+    $self->backend->logout;
+    $self->session->delete;
+    $self->session->flush;
+    $self->session($self->session->new);
 
     Log::Log4perl::MDC->put('sid', substr($self->session->id,0,4));
 
     # flush the session cookie
-    if ($cgi && $main::cookie) {
-        $main::cookie->{'-value'} = main::encrypt_cookie($self->session->id);
-        push @main::header, ('-cookie', $cgi->cookie( $main::cookie ));
-    }
+    $self->resp->session_cookie->id($self->session->id);
 
 }
 
-
-1;
+__PACKAGE__->meta->make_immutable;

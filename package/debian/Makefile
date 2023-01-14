@@ -1,16 +1,4 @@
-
-# we need this packages to build external cpan modules (debian squeeze)
-#
-# -- stuff added for squeeze
-# dh-make-perl (this will bring a bunch of dependencies automatically)
-# libmodule-build-perl
-#
-# -- stuff already in etch
-# libversion-perl libmodule-build-perl iblog-log4perl-perl libdatetime-perl
-# libapache-request-perl libtest-exception-perl libxml-sax-perl
-# libxml-sax-writer-perl libtree-dagnode-perl liburi-perl
-# libclass-factory-perl libxml-simple-perl libdatetime-format-strptime-perl
-# libhttp-server-simple-perl libdata-page-perl
+# we need this packages to build external cpan modules (debian 10 / buster)
 
 # do not change the order
 # some packages have build dependencies
@@ -21,27 +9,25 @@ PACKAGES=			\
 
 DEBIAN_VERSION = $(shell cat /etc/debian_version)
 
+# As we use --recursive in dh-make-perl make sure that all deps that
+# are available from the debian repositories are contained in the
+# build-deps.list as they will otherwise built again!
 EXTERNAL=				\
-	Crypt__OpenSSL__AES		\
-	Crypt__Cipher__AES \
+	Class__Observable \
+	Config__Merge \
 	Crypt__Argon2 \
 	Crypt__LibSCEP \
-	Data__SpreadPagination		\
-	Class__Observable 		\
-	Git__PurePerl \
-	Config__Merge \
-	Config__Versioned \
-	Proc__SafeExec \
-	XML__Filter__XInclude \
+	Crypt__OpenSSL__AES \
 	Crypt__PKCS10 \
 	Crypt__X509 \
 	DBIx__Handler \
-    DBIx__TransactionManager \
-    Log__Log4perl__Layout__JSON \
-    JSON__MaybeXS \
-    YAML__Tiny
-
-EXTERNAL2= \
+	DBIx__TransactionManager \
+	Feature__Compat__Try \
+	Git__PurePerl \
+	JSON__MaybeXS \
+	Log__Log4perl__Layout__JSON \
+	Proc__SafeExec \
+	YAML__Tiny \
 	Connector \
 	Workflow
 
@@ -50,22 +36,15 @@ CORE = \
     Module__Build__Tiny \
     Module__Load
 
-
-Data__SpreadPagination_BUILDOPTS = --version 0.1.2
-
-.PHONY : $(PACKAGES) $(EXTERNAL) $(EXTERNAL2) CGI DateTime__Format__DateParse
+.PHONY : $(PACKAGES) $(EXTERNAL) CGI
 
 openxpki: $(PACKAGES)
 
-cpan: cpan_dependency cpan_dependency2
+cpan: cpan_dependency
 
 cpan_dependency: $(EXTERNAL)
 
-cpan_dependency2: $(EXTERNAL2)
-
-release: cpan_dependency cpan_dependency2 Crypt__LibSCEP openxpki
-
-trusty: CGI Module__Build__Tiny Module__Load
+release: cpan_dependency Crypt__LibSCEP openxpki
 
 default:	clean
 	$(MAKE) $(EXTERNAL)
@@ -73,28 +52,18 @@ default:	clean
 	$(MAKE) resultlocal
 	$(MAKE) check
 
-# Fetch outdated version of Workflow because the newest isn't
-# compatible with OpenXPKI
+# run dh-make-perl with --install --recursive to auto-build/add missing dependancies
+# for Buster this is required for at least Feature::Compat::Try pulling in
+# Syntax::Keyword::Try and other deps that are too old in buster repos
 $(EXTERNAL):
 	test -d deb || mkdir deb
 	test -d deb/cpan || mkdir deb/cpan/
-	cd deb/cpan/ && DEBEMAIL=debian@openxpki.org DEBFULLNAME="OpenXPKI Foundation" DEB_BUILD_OPTIONS=nocheck dh-make-perl --build $($@_BUILDOPTS) --cpan $(subst __,::,$@)
-
-$(EXTERNAL2):
-	test -d deb || mkdir deb
-	test -d deb/cpan || mkdir deb/cpan/
-	cd deb/cpan/ && PERL5LIB=`pwd`"/../../lib/:$PERL5LIB" DEBEMAIL=debian@openxpki.org DEBFULLNAME="OpenXPKI Foundation" DEB_BUILD_OPTIONS=nocheck dh-make-perl --build --cpan $(subst __,::,$@)
+	cd deb/cpan/ && DEBEMAIL=debian@openxpki.org DEBFULLNAME="OpenXPKI Foundation" DEB_BUILD_OPTIONS=nocheck dh-make-perl --build $($@_BUILDOPTS) --recursive --install --cpan $(subst __,::,$@)
 
 $(CORE):
 	test -d deb || mkdir deb
 	test -d deb/cpan || mkdir deb/cpan/
 	cd deb/cpan/ && DEBEMAIL=debian@openxpki.org DEBFULLNAME="OpenXPKI Foundation" DEB_BUILD_OPTIONS=nocheck dh-make-perl --core-ok --build --cpan $(subst __,::,$@)
-
-DateTime__Format__DateParse:
-	test -d deb || mkdir deb
-	test -d deb/cpan || mkdir deb/cpan/
-	cd deb/cpan/ &&  dh-make-perl --build --notest --depends 'libdatetime-timezone-perl, libdatetime-perl, libtimedate-perl' --cpan $(subst __,::,$@)
-
 
 $(PACKAGES): info
 	test -d deb || mkdir deb

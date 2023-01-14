@@ -1,8 +1,6 @@
 package OpenXPKI::Client::Service::SCEP;
-
 use Moose;
-use warnings;
-use strict;
+
 use Carp;
 use English;
 use Data::Dumper;
@@ -121,6 +119,8 @@ sub generate_pkcs7_response {
     }
 
     if (!$response->is_server_error()) {
+        my $conf = $self->config()->config();
+        $params{chain} = $conf->{output}->{chain} || 'chain';
         return $self->backend()->run_command('scep_generate_cert_response',
         { %params, (
             identifier  => $response->result,
@@ -186,6 +186,6 @@ around 'build_params' => sub {
     return $params;
 };
 
-1;
+__PACKAGE__->meta->make_immutable;
 
 __END__;

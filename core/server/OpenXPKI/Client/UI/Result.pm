@@ -8,6 +8,7 @@ use Data::Dumper;
 use Digest::SHA qw(sha1_base64);
 use MIME::Base64;
 use Carp qw( confess );
+use Encode;
 
 # CPAN modules
 use CGI 4.08 qw( -utf8 );
@@ -21,44 +22,228 @@ use Crypt::PRNG;
 # Project modules
 use OpenXPKI::i18n qw( i18nTokenizer );
 use OpenXPKI::Serialization::Simple;
+use OpenXPKI::Client::UI::Response;
 
 
-# Attributes set via constructor by OpenXPKI::Client::UI->__load_class()
+# Attributes set via constructor
+
 has req => (
     is => 'ro',
     isa => 'OpenXPKI::Client::UI::Request',
     predicate => 'has_req',
+    required => 1,
 );
 
 has extra => (
     is => 'rw',
     isa => 'HashRef',
-    default => sub { return {}; },
+    default => sub { {} },
 );
 
 has _client => (
     is => 'ro',
     isa => 'OpenXPKI::Client::UI',
     init_arg => 'client',
+    required => 1,
+);
+
+=head1 RESPONSE RELATED ATTRIBUTES AND METHODS
+
+Most of the following methods are accessors to attributes. Except from those
+starting with C<set_*> they can also be called without arguments to retrieve
+the current value.
+
+Please note that currently some of these attributes are of type I<Scalar>,
+I<ArrayRef> or I<HashRef> while others are "data transfer objects" (DTOs) that
+use L<OpenXPKI::Client::UI::Response::DTO> and encapsulate several values.
+The DTOs have a C<resolve> method which recursively builds a I<HashRef> from
+the encapsulated data. The I<HashRef> gets converted to JSON
+(in L</_render_body_to_str>) and is sent to the web UI.
+
+=head2 redirect
+
+Enforce a client side redirect to the given page:
+
+    $self->redirect->to('workflow!search');
+    $self->redirect->external('https://...');
+
+=head2 confined_response
+
+Enforce response to a confined request, i.e. and autocomplete query. Returns
+an arbitrary JSON structure to the web UI.
+
+    $self->confined_response([1,2,3]);
+
+=head2 main
+
+Set the structure of the main contents.
+
+    $self->main->add_section(...);
+    $self->main->add_form(...);
+
+C<add_form> receives constructor parameters for L<OpenXPKI::Client::UI::Response::Section::Form>.
+
+=head2 infobox
+
+Set the structure of the right hand side info box.
+
+Usage equivalent to L</main>.
+
+=head2 language
+
+Set the language.
+
+    $self->language('de');
+
+=head2 menu
+
+Set the menu structure.
+
+    $self->menu->items([ ... ]);
+    # or
+    $self->menu->add_item({
+        key => 'logout',
+        label => 'I18N_OPENXPKI_UI_CLEAR_LOGIN',
+    });
+
+=head2 on_exception
+
+Add an exception handler for HTTP codes.
+
+    $self->on_exception->add_handler(
+        status_code => [ 403, 401 ],
+        redirect => $target,
+    );
+
+=head2 page and set_page
+
+Set page related information.
+
+    $self->page->label('I18N_OPENXPKI_UI_WORKFLOW_BULK_TITLE');
+    $self->page->shortlabel('I18N_OPENXPKI_UI_WORKFLOW_BULK_TITLE');
+    $self->page->description('I18N_OPENXPKI_UI_WORKFLOW_BULK_DESCRIPTION');
+    $self->page->breadcrumb([...]);
+    $self->page->css_class('important');
+    $self->page->large(1);
+
+    # set several attributes at once
+    $self->set_page(
+        label => 'I18N_OPENXPKI_UI_WORKFLOW_BULK_TITLE',
+        description => 'I18N_OPENXPKI_UI_WORKFLOW_BULK_DESCRIPTION',
+    );
+
+=head2 ping
+
+Configure keepalive ping to an endpoint.
+
+    $self->ping({ href => '...', timeout => 30 }); # timeout is in milliseconds
+
+=head2 refresh and set_refresh
+
+Configure a periodic page refresh timer.
+
+    $self->refresh->uri("workflow!load!wf_id!$wf_id");
+    $self->refresh->timeout(30);
+
+    # set several attributes at once
+    $self->set_refresh(
+        uri => "workflow!load!wf_id!$wf_id",
+        timeout => 30,
+    );
+
+=head2 rtoken
+
+Set the request token.
+
+    $self->rtoken($rtoken);
+
+=head2 status
+
+Set status or error message.
+
+    $self->status->info('I18N_OPENXPKI_UI_WORKFLOW_STATE_WATCHDOG_PAUSED_30SEC');
+    $self->status->success('...');
+    $self->status->warn('...');
+    $self->status->error('...');
+
+=head2 tenant
+
+Set the tenant.
+
+    $self->tenant($tenant);
+
+=head2 user and set_user
+
+Set user related information.
+
+    $self->user->name(...);
+    $self->user->role(...);
+    $self->user->realname(...);
+    $self->user->role_label(...);
+    $self->user->pki_realm(...);
+    $self->user->pki_realm_label(...);
+    $self->user->checksum(...);
+    $self->user->sid(...);
+    $self->user->last_login($timestamp);
+    $self->user->tenants([...]);
+
+    # set several attributes at once
+    $self->set_user(%{ $user });
+
+=head2 add_header
+
+Add one or more HTTP response headers.
+
+    $response->add_header(-type => 'application/json; charset=UTF-8');
+
+=head2 get_header_str
+
+Return the string containing the HTTP headers.
+
+    print $self->get_header_str($cgi);
+
+=head2 raw_bytes and raw_bytes_callback
+
+Set a raw byte output (i.e. no JSON response) to send files to the client.
+
+    $self->add_header(-type => $data->{mime}, -attachment => $data->{attachment});
+    $self->raw_bytes($data);
+
+    # to avoid storing large data in memory
+    $self->raw_bytes_callback(sub {
+        my $consume = shift;
+        open (my $fh, "<", $source) || die "Unable to open $source: $!";
+        while (my $line = <$fh>) { $consume->($line) }
+        close $fh;
+    });
+
+=cut
+has resp => (
+    is => 'ro',
+    isa => 'OpenXPKI::Client::UI::Response',
+    required => 1,
+    handles => [ qw(
+        redirect
+        confined_response has_confined_response
+        infobox
+        language
+        main
+        menu
+        on_exception
+        page set_page
+        ping
+        refresh set_refresh
+        rtoken
+        status
+        tenant
+        user set_user
+        add_header
+        get_header_str
+        raw_bytes has_raw_bytes raw_bytes_callback has_raw_bytes_callback
+    ) ],
 );
 
 # Internal attributes
-has _error => (
-    is => 'rw',
-    isa => 'HashRef|Undef',
-);
-
-has _page => (
-    is => 'rw',
-    isa => 'HashRef|Undef',
-    lazy => 1,
-    default => undef,
-);
-
-has _status => (
-    is => 'rw',
-    isa => 'HashRef|Undef',
-);
 
 has _last_reply => (
     is => 'rw',
@@ -70,23 +255,6 @@ has _session => (
     isa => 'CGI::Session',
     lazy => 1,
     builder => '_init_session',
-);
-
-has _result => (
-    is => 'rw',
-    isa => 'HashRef|Undef',
-    default => sub { {} },
-);
-
-has _refresh => (
-    is => 'rw',
-    isa => 'HashRef|Undef',
-);
-
-has redirect => (
-    is => 'rw',
-    isa => 'Str|HashRef',
-    default => '',
 );
 
 has serializer => (
@@ -108,15 +276,20 @@ has _prefix_jwt => (
     default => '_encrypted_jwt_',
 );
 
-sub BUILD {
+# Redirection (from an action_* method) to an init_* method that may live
+# in another class.
+# The ArrayRef holds the page call (e.g. "home!welcome") plus additional
+# arguments that shall be passed to the method.
+has _internal_redirect_target => (
+    is => 'rw',
+    isa => 'ArrayRef',
+    reader => 'internal_redirect_target',
+    init_arg => undef,
+);
 
-    my $self = shift;
-    # load global client status if set
-    if ($self->_client()->_status()) {
-        $self->_status(  $self->_client()->_status() );
-    }
+=head1 METHODS
 
-}
+=cut
 
 sub _init_session {
 
@@ -133,92 +306,41 @@ sub cgi {
 
 }
 
-sub add_section {
+=head2 internal_redirect
 
-    my $self = shift;
-    my $arg = shift;
+Internal redirection from an C<action_*> method to a page (C<init_*> method).
 
-    push @{$self->_result()->{main}}, $arg;
+From within an C<action_*> method you may do this:
 
-    return $self;
-
-}
-
-sub set_status {
-
-    my $self = shift;
-    my $message = shift;
-    my $level = shift || 'info';
-    my $href = shift || '';
-
-    $self->_status({ level => $level, message => $message, href => $href });
-
-    return $self;
-
-}
-
-sub refresh() {
-
-    my $self = shift;
-    my $location = shift;
-    my $timeout = shift || 60;
-
-    $self->_refresh({ href => $location, timeout => $timeout * 1000 });
-
-    return $self;
-
-}
-
-=head2 send_command
-
-Expects the name of the command as first and the parameter hash as second
-argument. Sends the named command to the backend and returned the result.
-If the command does not succeed, set_status_from_error_reply is called
-and undef is returned. In case the command was a workflow action and the
-backend reports a validation error, the error from the validator is set
-as status.
-
-If you set a true value for the third parameter, the global status is
-B<not> set if an error occurs.
+    return $self->internal_redirect('home!welcome' => { name => "OpenXPKI" });
 
 =cut
-
-sub send_command {
-
+sub internal_redirect {
     my $self = shift;
-    my $command = shift;
-    my $params = shift || {};
-    my $nostatus = shift || 0;
-
-    $self->logger()->warn("APIv1 command - try to autoconvert");
-
-    my $newparam;
-    map { $newparam->{lc($_)} => $params->{$_} } keys %$params;
-
-    my $backend = $self->_client()->backend();
-    my $reply = $backend->send_receive_service_msg(
-        'COMMAND', { COMMAND => $command, PARAMS => $newparam, API => 2 }
-    );
-    $self->_last_reply( $reply );
-
-    $self->logger()->trace('send command raw reply: '. Dumper $reply) if $self->logger()->is_trace;
-
-    if ( $reply->{SERVICE_MSG} ne 'COMMAND' ) {
-        if (!$nostatus) {
-            $self->logger()->error("command $command failed ($reply->{SERVICE_MSG})");
-            $self->logger()->trace("command reply ". Dumper $reply) if $self->logger()->is_trace;
-            $self->set_status_from_error_reply( $reply );
-        }
-        return undef;
-    }
-
-    return $reply->{PARAMS};
-
+    $self->_internal_redirect_target([ @_ ]);
+    return $self;
 }
 
 =head2 send_command_v2
 
-Copy of send_command but uses the API2 methods.
+Sends the given command to the backend and returns the result.
+
+If an error occurs while executing the command (e.g. validation error from a
+workflow action), the global status is set in the response sent to the client,
+so the UI can show the error. This can be suppressed by setting the third
+parameter to C<1>.
+
+B<Parameters>
+
+=over
+
+=item * I<Str> C<$command> - command
+
+=item * I<HashRef> C<$params> - parameters to the command
+
+=item * I<Bool> C<$nostatus> - Set to C<1> to prevent setting the global status in case of errors. Default: 0
+
+=back
 
 =cut
 
@@ -227,18 +349,23 @@ sub send_command_v2 {
     my $self = shift;
     my $command = shift;
     my $params = shift || {};
-    my $nostatus = shift || 0;
+
+    my $flags = shift || { nostatus => 0 };
+    # legacy - third argument was boolean "nostatus"
+    if (!ref $flags && $flags) {
+        $flags = { nostatus => 1 };
+    }
 
     my $backend = $self->_client()->backend();
     my $reply = $backend->send_receive_service_msg(
-        'COMMAND', { COMMAND => $command, PARAMS => $params, API => 2 }
+        'COMMAND', { COMMAND => $command, PARAMS => $params, API => 2, TIMEOUT => ($flags->{timeout} || 0 ) }
     );
     $self->_last_reply( $reply );
 
     $self->logger()->trace('send command raw reply: '. Dumper $reply) if $self->logger->is_trace;
 
     if ( $reply->{SERVICE_MSG} ne 'COMMAND' ) {
-        if (!$nostatus) {
+        if (!$flags->{nostatus}) {
             $self->logger()->error("command $command failed ($reply->{SERVICE_MSG})");
             $self->logger()->trace("command reply ". Dumper $reply) if $self->logger()->is_trace;
             $self->set_status_from_error_reply( $reply );
@@ -279,7 +406,7 @@ sub set_status_from_error_reply {
     } else {
         $self->logger()->trace(Dumper $reply) if $self->logger()->is_trace;
     }
-    $self->_status({ level => 'error', message => $message });
+    $self->status->error($message);
 
     return $self;
 }
@@ -358,6 +485,30 @@ sub __tenant {
     return ();
 }
 
+sub __persist_status {
+    my $self = shift;
+    my $status = shift;
+
+    my $session_key = $self->__generate_uid();
+    $self->_session->param($session_key, $status);
+    $self->_session->expire($session_key, 15);
+
+    return '_status_id!' . $session_key;
+}
+
+sub __fetch_status {
+    my $self = shift;
+
+    my $session_key = $self->param('_status_id');
+    return unless $session_key;
+
+    my $status = $self->_session->param($session_key);
+    return unless ($status && ref $status eq 'HASH');
+
+    $self->logger->debug("Set persisted status: " . $status->{message});
+    return $status;
+}
+
 sub param_from_fields {
 
     my ($self, $fields) = @_;
@@ -393,16 +544,73 @@ sub param_from_fields {
     return $param;
 }
 
-=head2 logger
+=head2 log
 
-Return the class logger (log4perl ref)
+Return the class logger (log4perl ref).
 
 =cut
-
-sub logger {
-
+sub log {
     my $self = shift;
-    return $self->_client()->logger();
+    return $self->_client->logger;
+}
+
+=head2 logger
+
+Deprecated alias for L</log>.
+
+=cut
+sub logger {
+    my $self = shift;
+    return $self->_client->logger;
+}
+
+=head2 _render_body_to_str
+
+Assemble the return hash from the internal caches and return the result as a
+string.
+
+=cut
+sub _render_body_to_str {
+    my $self = shift;
+
+    my $status = $self->status->is_set ? $self->status->resolve : $self->__fetch_status;
+
+    #
+    # A) page redirect
+    #
+    if ($self->redirect->is_set) {
+        if ($status) {
+            # persist status and append to redirect URL
+            my $url_param = $self->__persist_status($status);
+            $self->redirect->to($self->redirect->to . '!' . $url_param);
+        }
+        return encode_json({
+            %{ $self->redirect->resolve },
+            session_id => $self->_session->id
+        });
+    }
+
+    #
+    # B) response to a confined request, i.e. no page update (auto-complete etc.)
+    #
+    if ($self->has_confined_response) {
+        return i18nTokenizer(encode_json($self->confined_response));
+    }
+
+    #
+    # C) regular response
+    #
+    my $result = $self->resp->resolve;
+
+    # show message of the day if we have a page section (may overwrite status)
+    if ($self->page->is_set && (my $motd = $self->_session->param('motd'))) {
+        $self->_session->param('motd', undef);
+        $result->{status} = $motd;
+    }
+    # add session ID
+    $result->{session_id} = $self->_session->id;
+
+    return i18nTokenizer(encode_json($result));
 }
 
 =head2 render
@@ -412,198 +620,73 @@ to the browser.
 
 =cut
 sub render {
-
     my $self = shift;
-    my $output = shift;
-
-    my $result = $self->_result();
-
-    $result->{error} = $self->_error() if $self->_error();
-
-
-    if ($self->_status()) {
-        $result->{status} = $self->_status();
-    } elsif ($self->param('_status')) {
-        my $status = $self->_session->param(scalar $self->param('_status'));
-        if ($status && ref $status eq 'HASH') {
-            $self->logger()->debug("Set persisted status " . $status->{message});
-            $result->{status} = $status;
-        }
-    }
-
-
-    $result->{page} = $self->_page() if $self->_page();
-    $result->{refresh} = $self->_refresh() if ($self->_refresh());
-
-    my $body;
-    # page redirect
-    my $redirect = $self->redirect;
-    my $redirect_url;
-    if ($redirect) {
-        if (ref $redirect ne 'HASH') {
-            $redirect = { goto => $redirect };
-        }
-
-        # Persist and append status
-        if ($result->{status}) {
-            my $uid = $self->__generate_uid();
-            $self->__temp_param($uid, $result->{status}, 15);
-            $redirect->{goto} .= '!_status!' . $uid;
-        }
-        $redirect_url = $redirect->{goto};
-
-        $redirect->{session_id} = $self->_session->id;
-        $body = encode_json( $redirect );
-
-    # raw data
-    } elsif ($result->{_raw}) {
-        $body = i18nTokenizer ( encode_json($result->{_raw}) );
-
-    # regular response
-    } else {
-        $result->{session_id} = $self->_session->id;
-
-        # Add message of the day if set and we have a page section
-        if ($result->{page} && (my $motd = $self->_session()->param('motd'))) {
-             $self->_session()->param('motd', undef);
-             $result->{status} = $motd;
-        }
-        $body = i18nTokenizer ( encode_json($result) );
-    }
-
-
     my $cgi = $self->cgi;
-    # Return the output into the given pointer
-    if ($output && ref $output eq 'SCALAR') {
-        $$output = $body;
 
-    } elsif (ref $cgi) {
-        if ($cgi->http('HTTP_X-OPENXPKI-Client')) {
-            # Start output stream
-            print $cgi->header( @main::header );
-            print $body;
+    if (not ref $cgi) {
+        $self->logger->error("Cannot render result - CGI object not available");
+        return $self;
+    }
 
-        } else {
-            my $url;
-            # redirect to given page
-            if ($redirect_url) {
-                $url = $redirect_url;
-            # redirect to downloads / result pages
-            } elsif ($body) {
-                $url = $self->__persist_response( { data => $body } );
-            }
-            # if url does not start with http or slash, prepend baseurl + route name
-            if ($url !~ m{\A http|/}x) {
-                my $baseurl = $self->_session()->param('baseurl');
-                $url = sprintf("%sopenxpki/%s", $baseurl, $url);
-            }
-            print $cgi->redirect($url);
+    # helper to print HTTP headers
+    my $print_headers = sub {
+        my $headers = $self->get_header_str($cgi);
+        $self->logger->trace("Response headers: $headers") if $self->logger->is_trace;
+        print $headers;
+    };
+
+    # File download
+    if ($self->has_raw_bytes or $self->has_raw_bytes_callback) {
+        $print_headers->();
+        # A) raw bytes in memory
+        if ($self->has_raw_bytes) {
+            $self->logger->debug("Sending raw bytes (in memory)");
+            print $self->raw_bytes;
+        }
+        # B) raw bytes retrieved by callback function
+        elsif ($self->has_raw_bytes_callback) {
+            $self->logger->debug("Sending raw bytes (via callback)");
+            # run callback, passing a printing function as argument
+            $self->raw_bytes_callback->(sub { print @_ });
         }
 
+    # Standard JSON response
+    } elsif ($cgi->http('HTTP_X-OPENXPKI-Client')) {
+        $print_headers->();
+        $self->logger->debug("Sending JSON response");
+        print $self->_render_body_to_str;
+
+    # Redirects
     } else {
-        $self->logger->error("Cannot render result - CGI object not available");
+        my $url = '';
+        # redirect to given page
+        if ($self->redirect->is_set) {
+            $url = $self->redirect->to;
+
+        # redirect to downloads / result pages
+        } elsif (my $body = $self->_render_body_to_str) {
+            $url = $self->__persist_response( { data => $body } );
+        }
+
+        # if url does not start with http or slash, prepend baseurl + route name
+        if ($url !~ m{\A http|/}x) {
+            my $baseurl = $self->_session->param('baseurl');
+            $url = sprintf("%sopenxpki/%s", $baseurl, $url);
+        }
+
+        # HTTP redirect
+        $self->logger->debug("Sending HTTP redirect to: $url");
+        print $cgi->redirect($url);
     }
 
     return $self;
 }
-
-=head2 init_fetch
-
-Method to send the result persisted with __persist_response
-
-=cut
-
-sub init_fetch {
-
-    my $self = shift;
-    my $arg = shift;
-
-    my $response = $self->param('id');
-    my $data = $self->__fetch_response( $response );
-
-    if (!$data) {
-        $self->logger()->error('Got empty response');
-        $self->redirect('home!welcome');
-        return $self;
-    }
-
-    $self->logger()->trace('Got response ' . Dumper $data) if $self->logger()->is_trace;
-
-    # support multi-valued responses (persisted as array ref)
-    if (ref $data eq 'ARRAY') {
-        my $idx = $self->param('idx');
-        $self->logger()->debug('Found mulitvalued response, index is  ' . $idx);
-        if (!defined $idx || ($idx > scalar @{$data})) {
-            die "Invalid index";
-        }
-        $data = $data->[$idx];
-    }
-
-    if (ref $data ne 'HASH') {
-        die "Invalid, incomplete or expired fetch statement";
-    }
-
-    $data->{mime} = "application/json; charset=UTF-8" unless($data->{mime});
-
-    # Start output stream
-    my $cgi = $self->cgi();
-
-    if ($data->{data}) {
-        print $cgi->header( @main::header, -type => $data->{mime}, -attachment => $data->{attachment} );
-        print $data->{data};
-        exit;
-    }
-
-    my ($type, $source) = ($data->{source} =~ m{(\w+):(.*)});
-    $self->logger()->debug('Fetch source: '.$type.', Key: '.$source );
-
-    if ($type eq 'file') {
-        open (my $fh, "<", $source) || die 'Unable to open file';
-        print $cgi->header( @main::header, -type => $data->{mime}, -attachment => $data->{attachment} );
-        while (my $line = <$fh>) {
-            print $line;
-        }
-        close $fh;
-    } elsif ($type eq 'datapool') {
-        # todo - catch exceptions/not found
-        my $dp = $self->send_command_v2( 'get_data_pool_entry', {
-            namespace => 'workflow.download',
-            key => $source,
-        });
-        if (!$dp->{value}) {
-            die "Requested data not found/expired";
-        }
-
-        print $cgi->header( @main::header, -type => $data->{mime}, -attachment => $data->{attachment} );
-        utf8::encode($dp->{value}) if ($data->{mime} =~ /utf-8/i);
-        print $dp->{value};
-
-    } elsif ($type eq 'report') {
-        # todo - catch exceptions/not found
-        my $report = $self->send_command_v2( 'get_report', {
-            name => $source,
-            format => 'ALL',
-        });
-        if (!$report) {
-            die "Requested data not found/expired";
-        }
-
-        print $cgi->header( @main::header, -type => $report->{mime_type}, -attachment => $report->{report_name} );
-        print $report->{report_value};
-
-    }
-
-    exit;
-
-}
-
 
 =head2 _escape ( string )
 
 Replace html entities in string by their encoding
 
 =cut
-
 sub _escape {
 
     my $self = shift;
@@ -611,8 +694,6 @@ sub _escape {
     return encode_entities($arg);
 
 }
-
-
 
 =head2 __register_wf_token( wf_info, token )
 
@@ -622,7 +703,6 @@ with the definiton of a hidden field which can be directly
 pushed onto the field list. wf_info can be undef / empty string.
 
 =cut
-
 sub __register_wf_token {
 
     my $self = shift;
@@ -649,7 +729,6 @@ as string and an optional hash to pass as initial parameters to the
 create method. Returns the full action target as string.
 
 =cut
-
 sub __register_wf_token_initial {
 
     my $self = shift;
@@ -667,8 +746,6 @@ sub __register_wf_token_initial {
     $self->_session->param($id, $token);
     return  "workflow!index!wf_token!$id";
 }
-
-
 
 =head2 __fetch_wf_token( wf_token, purge )
 
@@ -712,34 +789,27 @@ sub __purge_wf_token {
 
 =head2 __persist_response
 
-Persist the current response to retrieve it after a http roundtrip
-Used to break out of the JS app for downloads or reroute result pages
+Persist the given response data to retrieve it after an HTTP roundtrip.
+Used to break out of the JavaScript app for downloads or to reroute result
+pages.
+
+Returns the page call URI for L<OpenXPKI::Client::UI::Cache/init_fetch>.
 
 =cut
 
 sub __persist_response {
 
     my $self = shift;
-    my $data = shift;
-    my $expire = shift;
+    my $data = shift // die "Attempt to persist empty response data";
+    my $expire = shift // '+5m';
 
-    $expire = '+5m' unless defined $expire;
-
-    my $id = $self->__generate_uid();
-    $self->logger()->debug('persist response ' . $id);
-
-    # Auto Persist - use current result when no data is given
-    if (!defined $data) {
-        my $out;
-        $self->render( \$out );
-        $data = { data => $out };
-    }
+    my $id = $self->__generate_uid;
+    $self->log->debug('persist response ' . $id);
 
     $self->_session->param('response_'.$id, $data );
+    $self->_session->expire('response_'.$id, $expire) if $expire;
 
-    $self->_session->expire('response_'.$id, $expire) if ($expire);
-
-    return  "result!fetch!id!$id";
+    return  "cache!fetch!id!$id";
 
 }
 
@@ -767,15 +837,15 @@ sub __fetch_response {
 
 =head2 __generate_uid
 
-Generate a random uid (base64 encoded with dangerours chars removed)
+Generate a random uid (RFC 3548 URL and filename safe base64)
 
 =cut
 sub __generate_uid {
-
     my $self = shift;
-    my $queryid = sha1_base64(time.rand().$$);
-    $queryid =~ s{[+/]}{}g;
-    return $queryid;
+    my $uid = sha1_base64(time.rand().$$);
+    ## RFC 3548 URL and filename safe base64
+    $uid =~ tr/+\//-_/;
+    return $uid;
 }
 
 =head2 __render_pager
@@ -826,34 +896,6 @@ sub __render_pager {
         reverse => $result->{query}->{reverse} ? 1 : 0,
     }
 }
-
-
-=head2 __temp_param
-
-Get or set a temporary session parameter, the value is auto-destroyed after
-it was not being used for a given time period, default is 15 minutes.
-
-=cut
-
-sub __temp_param {
-
-    my $self = shift;
-    my $key = shift;
-    my $data = shift;
-    my $expire = shift;
-
-    # one argument - get request
-    if (!defined $data) {
-        return $self->_session->param( $key );
-    }
-
-    $expire = '+15m' unless defined $expire;
-    $self->_session->param($key, $data);
-    $self->_session->expire($key, $expire) if ($expire);
-
-    return $self;
-}
-
 
 =head2 __build_attribute_subquery
 
@@ -1150,6 +1192,5 @@ sub fetch_autocomplete_params {
     return \%params;
 
 }
-
 
 __PACKAGE__->meta->make_immutable;

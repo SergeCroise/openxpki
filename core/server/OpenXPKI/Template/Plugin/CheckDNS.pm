@@ -1,5 +1,9 @@
 package OpenXPKI::Template::Plugin::CheckDNS;
 
+use Moose;
+use MooseX::NonMoose;
+extends 'Template::Plugin';
+
 =head1 OpenXPKI::Template::Plugin::CheckDNS
 
 =head2 How to use
@@ -9,24 +13,19 @@ Plugin for Template::Toolkit to check FQDNs against DNS.
 You can pass a timeout in seconds and a comma seperated list of servers
 to the "USE" statement:
 
-    [% USE CheckDNS(timeout => 10, servers => '1.2.3.4,5.6.7.8') %]
+    [% USE CheckDNS(timeout = 10, servers = '1.2.3.4, 5.6.7.8') %]
 
 =cut
 
-use strict;
-use warnings;
 use utf8;
 
-use Moose;
 use Net::DNS;
-use Template::Plugin;
 
-
+use Moose::Util::TypeConstraints;
 use HTML::Entities;
 use OpenXPKI::Debug;
 use OpenXPKI::Exception;
 
-extends 'Template::Plugin';
 
 has 'resolver' => (
     is => 'ro',
@@ -42,12 +41,26 @@ has 'timeout' => (
     default => 5,
 );
 
+
+my $type = subtype as 'ArrayRef';
+coerce $type, from 'Str', via { [ split /\s*,\s*/ ] };
 has 'servers' => (
     is => 'rw',
-    isa => 'ArrayRef|Undef',
-    lazy => 1,
-    default => undef
+    isa => $type,
+    coerce => 1,
+    predicate => 'has_servers',
 );
+
+
+# replicate behaviour of base class Template::Plugin: discard $context
+around BUILDARGS => sub {
+    my $orig = shift;
+    my $class = shift;
+    my $context = shift; # currently unused
+    my $args = shift // {};
+
+    return $class->$orig($args);
+};
 
 sub __check_fqdn {
 
@@ -56,28 +69,6 @@ sub __check_fqdn {
     return ($fqdn =~ m{ \A [a-z0-9] [a-z0-9-]* (\.[a-z0-9-]*[a-z0-9])+ \z }xi);
 
 }
-
-
-sub new {
-
-    my ($class, $context, $args) = @_;
-    $args ||= { };
-
-    my $self = bless {
-        _CONTEXT => $context,
-    }, $class;           # returns blessed MyPlugin object
-
-    if ($args->{timeout}) {
-        $self->timeout($args->{timeout});
-    }
-    if ($args->{servers}) {
-        my @s = split /,/, $args->{servers};
-        $self->servers( \@s );
-    }
-    return $self;
-
-}
-
 
 sub _init_dns {
 
@@ -90,7 +81,7 @@ sub _init_dns {
     # the resolver waits for retrans even if a timeout occured
     $rr->retrans($self->timeout());
 
-    if ($self->servers()) {
+    if ($self->has_servers()) {
         $rr->nameservers( @{$self->servers()} );
     }
     return $rr;
@@ -201,4 +192,4 @@ sub resolve {
 
 }
 
-1;
+__PACKAGE__->meta->make_immutable;

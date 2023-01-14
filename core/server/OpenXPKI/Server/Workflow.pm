@@ -162,6 +162,7 @@ sub execute_action {
     my ( $self, $action_name, $autorun ) = @_;
     ##! 1: 'execute_action '.$action_name
 
+    no warnings 'recursion';
     # note - transaction is already open as it was started either in
     # the service layer or the watchdog. For autorun with DBI persister
     # the persister will do a commit/start when required
@@ -540,6 +541,8 @@ sub save_initial {
     }
 
     $self->context->param( wf_current_action => $action_name );
+    $self->context->param( wf_pause_msg => 'I18N_OPENXPKI_UI_WORKFLOW_MOVE_TO_BACKGROUND' );
+
     $self->persist_context(2);
     $self->_save();
 

@@ -1,15 +1,13 @@
 package OpenXPKI::Crypt::CRL;
 
+use Moose;
+
 # some code imported from Crypt::X509::CRL
 
-use strict;
-use warnings;
 use English;
 
 use Convert::ASN1;
-use Digest::SHA qw(sha1_base64 sha1_hex);
 use MIME::Base64;
-use Moose;
 
 has data => (
     is => 'ro',
@@ -475,8 +473,7 @@ sub to_hash {
 
 }
 
-1;
-
+__PACKAGE__->meta->make_immutable;
 
 __END__;
 

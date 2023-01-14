@@ -31,8 +31,7 @@ sub action_get_styles_for_profile {
 
     my $cert_subject_style = $styles[0]->{value};
 
-    $self->_result()->{_raw} = {
-        _returnType => 'partial',
+    $self->confined_response({
         fields => [{
             name => "cert_subject_style",
             label => 'I18N_OPENXPKI_UI_WORKFLOW_FIELD_CERT_SUBJECT_STYLE_LABEL',
@@ -40,7 +39,7 @@ sub action_get_styles_for_profile {
             type => 'select',
             options => \@styles
         }]
-    };
+    });
 
     return $self;
 
@@ -94,10 +93,7 @@ sub action_get_key_param {
         }
     }
 
-    $self->_result()->{_raw} = {
-        _returnType => 'partial',
-        fields => \@fields
-    };
+    $self->confined_response({ fields => \@fields });
     return $self;
 
 }

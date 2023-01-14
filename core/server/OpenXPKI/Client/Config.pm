@@ -1,6 +1,6 @@
 package OpenXPKI::Client::Config;
-
 use Moose;
+
 use File::Spec;
 use Cache::LRU;
 use Config::Std;
@@ -360,9 +360,9 @@ sub parse_uri() {
     # route can contain a suffix like .exe which is used by some scep clients
     my ($ep, $rt);
     if (defined $ENV{SCRIPT_URL}) {
-        ($ep, $rt) = $ENV{SCRIPT_URL} =~ qr@ ${service} / ([^/]+) (?:/ ([\w\-\/]+ (?:\.\w{3})? ) )?\z@x;
+        ($ep, $rt) = $ENV{SCRIPT_URL} =~ qr@ ${service} / ([^/]+) (?: / ([\w\-\/]+ (?:\.\w{3})? )? )?\z@x;
     } elsif (defined $ENV{REQUEST_URI}) {
-        ($ep,$rt) = $ENV{REQUEST_URI} =~ qr@ ${service} / ([^/\?]+) (?:/([\w\-\/]+ (?:\.\w{3})? ))? (\?.*)? \z@x;
+        ($ep,$rt) = $ENV{REQUEST_URI} =~ qr@ ${service} / ([^/\?]+) (?: / ([\w\-\/]+ (?:\.\w{3})? )? )? (\?.*)? \z@x;
     }
 
     if (!$ep) {
@@ -499,6 +499,6 @@ sub __init_logger {
 
 }
 
-1;
+__PACKAGE__->meta->make_immutable;
 
 __END__;

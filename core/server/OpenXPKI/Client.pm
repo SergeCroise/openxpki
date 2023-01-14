@@ -1,16 +1,9 @@
-# OpenXPKI::Client
-# Written 2006 by Michael Bell and Martin Bartosch for the OpenXPKI project
-# (C) Copyright 2006 by The OpenXPKI Project
-
 package OpenXPKI::Client;
-
-use warnings;
-use strict;
-use Carp;
-use English;
-
 use Moose;
 
+use English;
+
+use Carp;
 use Socket;
 
 use Sys::SigAction qw( sig_alarm set_sig_handler );
@@ -221,7 +214,7 @@ sub talk {
 
     if ($EVAL_ERROR) {
         OpenXPKI::Exception->throw(
-            message => 'I18N_OPENXPKI_CLIENT_SEND_RECEIVE_SERVICE_MSG_ERROR_DURING_SEND_SERVICE_MSG',
+            message => 'Error while writing to socket',
             params  => {
                 EVAL_ERROR => $EVAL_ERROR,
             },
@@ -231,8 +224,12 @@ sub talk {
     my $result;
     my $sh = set_sig_handler('ALRM', sub {
         $self->close_connection();
-        OpenXPKI::Exception->throw(
-            message => "I18N_OPENXPKI_CLIENT_COLLECT_TIMEOUT",
+        OpenXPKI::Exception::Timeout->throw(
+            message => 'Timeout while reading from socket',
+            params  => {
+                command => ($msg->{SERVICE_MSG} eq 'COMMAND' ? $msg->{PARAMS}->{COMMAND} : $msg->{SERVICE_MSG}),
+                timeout => $self->timeout()
+            },
         );
     });
 
@@ -244,7 +241,7 @@ sub talk {
 
     if (my $eval_err = $EVAL_ERROR) {
         OpenXPKI::Exception->throw(
-            message => 'I18N_OPENXPKI_CLIENT_SEND_RECEIVE_SERVICE_MSG_ERROR_DURING_COLLECT',
+            message => 'Error while reading from socket',
             params  => {
                 EVAL_ERROR => $eval_err,
             },
@@ -498,7 +495,8 @@ sub get_session_id {
     return $self->session_id();
 }
 
-1;
+__PACKAGE__->meta->make_immutable;
+
 __END__
 
 =head1 NAME

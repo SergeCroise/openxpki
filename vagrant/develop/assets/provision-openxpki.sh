@@ -1,7 +1,8 @@
 #!/bin/bash
 # Install OpenXPKI
 
-. /vagrant/assets/functions.sh
+ROOTDIR="$(dirname "$0")"; mountpoint -q /vagrant && ROOTDIR=/vagrant/assets
+. "$ROOTDIR/functions.sh"
 
 #
 # Configure OpenXPKI
@@ -26,29 +27,31 @@ while read def; do export $def; done < /etc/environment
 
 # USERS AND GROUPS
 
+apache_user=www-data
+if $(grep -q apache /etc/passwd); then apache_user=apache; fi
+
 # openxpki
 if ! $(grep -q openxpki /etc/passwd); then
     echo "System user 'openxpki'"
-    addgroup --quiet --system openxpki
-    adduser  --quiet --system --no-create-home --disabled-password --ingroup openxpki openxpki
+    useradd  --system --no-create-home -U openxpki
     # add apache user to openxpki group (to allow connecting the socket)
-    usermod -G openxpki www-data
+    usermod -G openxpki $apache_user
 else
     echo "System user 'openxpki' - already set up."
 fi
 
 # pkiadm
-if ! $(grep -q pkiadm /etc/passwd); then
-    echo "System user 'pkiadm'"
-    adduser --quiet --system --disabled-password --group pkiadm
-    usermod pkiadm -G openxpki
-    # In case somebody decided to change the home base
-    HOME=`grep pkiadm /etc/passwd | cut -d":" -f6`
-    chown pkiadm:openxpki $HOME
-    chmod 750 $HOME
-else
-    echo "System user 'pkiadm' - already set up."
-fi
+# if ! $(grep -q pkiadm /etc/passwd); then
+#     echo "System user 'pkiadm'"
+#     adduser --quiet --system --disabled-password --group pkiadm
+#     usermod pkiadm -G openxpki
+#     # In case somebody decided to change the home base
+#     HOME=`grep pkiadm /etc/passwd | cut -d":" -f6`
+#     chown pkiadm:openxpki $HOME
+#     chmod 750 $HOME
+# else
+#     echo "System user 'pkiadm' - already set up."
+# fi
 
 # Create the sudo file to restart oxi from pkiadm
 if [ -d /etc/sudoers.d ]; then
@@ -67,12 +70,12 @@ mkdir -p /var/log/openxpki
 chown openxpki:openxpki /var/log/openxpki
 
 mkdir -p /var/www/openxpki
-chown www-data:www-data /var/www/openxpki
+chown $apache_user:$apache_user /var/www/openxpki
 
 # LOG FILES
 for f in scep.log soap.log webui.log rpc.log est.log; do
     touch /var/log/openxpki/$f
-    chown www-data:openxpki /var/log/openxpki/$f
+    chown $apache_user:openxpki /var/log/openxpki/$f
     chmod 640 /var/log/openxpki/$f
 done
 
@@ -92,6 +95,6 @@ if command -v apache2 >/dev/null; then
 fi
 
 echo "Install OpenXPKI from host sources"
-$OXI_SOURCE_DIR/tools/testenv/oxi-refresh --full 2>&1 | tee $LOG | sed -u 's/^/> /g'
+$OXI_SOURCE_DIR/tools/testenv/oxi-refresh --full 2>&1 | tee $LOG | sed -u 's/^/    /mg'
 
 set +e

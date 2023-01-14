@@ -51,6 +51,7 @@ OpenXPKI/Client/Service/Role/PickupWorkflow.pm
 OpenXPKI/Client/UI.pm
 OpenXPKI/Client/UI/Bootstrap.pm
 OpenXPKI/Client/UI/Bulk.pm
+OpenXPKI/Client/UI/Cache.pm
 OpenXPKI/Client/UI/Certificate.pm
 OpenXPKI/Client/UI/Crl.pm
 OpenXPKI/Client/UI/Handle/Profile.pm
@@ -61,11 +62,28 @@ OpenXPKI/Client/UI/Information.pm
 OpenXPKI/Client/UI/Login.pm
 OpenXPKI/Client/UI/Profile.pm
 OpenXPKI/Client/UI/Request.pm
+OpenXPKI/Client/UI/Response.pm
+OpenXPKI/Client/UI/Response/DTO.pm
+OpenXPKI/Client/UI/Response/DTORole.pm
+OpenXPKI/Client/UI/Response/Menu.pm
+OpenXPKI/Client/UI/Response/OnException.pm
+OpenXPKI/Client/UI/Response/OnException/Handler.pm
+OpenXPKI/Client/UI/Response/PageInfo.pm
+OpenXPKI/Client/UI/Response/Redirect.pm
+OpenXPKI/Client/UI/Response/Refresh.pm
+OpenXPKI/Client/UI/Response/Section/Form.pm
+OpenXPKI/Client/UI/Response/SectionRole.pm
+OpenXPKI/Client/UI/Response/Sections.pm
+OpenXPKI/Client/UI/Response/Status.pm
+OpenXPKI/Client/UI/Response/User.pm
 OpenXPKI/Client/UI/Result.pm
 OpenXPKI/Client/UI/Secret.pm
+OpenXPKI/Client/UI/SessionCookie.pm
 OpenXPKI/Client/UI/Source.pm
 OpenXPKI/Client/UI/Users.pm
 OpenXPKI/Client/UI/Workflow.pm
+OpenXPKI/Client/UI/Workflow/Action.pm
+OpenXPKI/Client/UI/Workflow/Init.pm
 
 
 ## Config Layers
@@ -89,6 +107,7 @@ OpenXPKI/Crypt/PKCS7.pm
 OpenXPKI/Crypt/PKCS10.pm
 OpenXPKI/Crypt/PubKey.pm
 OpenXPKI/Crypt/X509.pm
+OpenXPKI/Crypt/PKCS7/CertificateList.pm
 OpenXPKI/Crypt/PKCS7/SCEP.pm
 
 ## Crypto layer
@@ -256,6 +275,7 @@ OpenXPKI/Server/API2/Plugin/Cert/list_used_issuers.pm
 OpenXPKI/Server/API2/Plugin/Cert/private_key.pm
 OpenXPKI/Server/API2/Plugin/Cert/search_cert.pm
 OpenXPKI/Server/API2/Plugin/Cert/validate_certificate.pm
+OpenXPKI/Server/API2/Plugin/Cert/set_cert_metadata.pm
 OpenXPKI/Server/API2/Plugin/Cert/DateCondition.pm
 OpenXPKI/Server/API2/Plugin/Control/reload.pm
 OpenXPKI/Server/API2/Plugin/Control/version.pm
@@ -272,13 +292,14 @@ OpenXPKI/Server/API2/Plugin/Crypto/password_quality/CheckLegacyRole.pm
 OpenXPKI/Server/API2/Plugin/Crypto/password_quality/CheckStandardRole.pm
 OpenXPKI/Server/API2/Plugin/Crypto/password_quality/TopPasswords.pm
 OpenXPKI/Server/API2/Plugin/Crypto/password_quality/Validate.pm
+OpenXPKI/Server/API2/Plugin/Datapool/clear_data_pool_namespace.pm
 OpenXPKI/Server/API2/Plugin/Datapool/create_datapool_encryption_key.pm
+OpenXPKI/Server/API2/Plugin/Datapool/delete_data_pool_entry.pm
 OpenXPKI/Server/API2/Plugin/Datapool/get_data_pool_entry.pm
 OpenXPKI/Server/API2/Plugin/Datapool/get_datavault_status.pm
 OpenXPKI/Server/API2/Plugin/Datapool/list_data_pool_entries.pm
 OpenXPKI/Server/API2/Plugin/Datapool/modify_data_pool_entry.pm
 OpenXPKI/Server/API2/Plugin/Datapool/set_data_pool_entry.pm
-OpenXPKI/Server/API2/Plugin/Datapool/delete_data_pool_entry.pm
 OpenXPKI/Server/API2/Plugin/Datapool/Util.pm
 OpenXPKI/Server/API2/Plugin/Import/import_crl.pm
 OpenXPKI/Server/API2/Plugin/Profile/Util.pm
@@ -337,7 +358,6 @@ OpenXPKI/Server/API2/Plugin/Workflow/get_workflow_log.pm
 OpenXPKI/Server/API2/Plugin/Workflow/get_workflow_type_for_id.pm
 OpenXPKI/Server/API2/Plugin/Workflow/list_workflow_titles.pm
 OpenXPKI/Server/API2/Plugin/Workflow/search_workflow_instances.pm
-OpenXPKI/Server/API2/Plugin/Workflow/start_workflow.pm
 OpenXPKI/Server/API2/Plugin/Workflow/wakeup_resume_workflow.pm
 
 
@@ -430,6 +450,7 @@ OpenXPKI/Server/Workflow/Activity/User/PersistUserData.pm
 OpenXPKI/Server/Workflow/Activity/Tools/AddCertExtension.pm
 OpenXPKI/Server/Workflow/Activity/Tools/AppendCertificateMetadata.pm
 OpenXPKI/Server/Workflow/Activity/Tools/Approve.pm
+OpenXPKI/Server/Workflow/Activity/Tools/BuildPKCS7CertList.pm
 OpenXPKI/Server/Workflow/Activity/Tools/CalculateApprovalPoints.pm
 OpenXPKI/Server/Workflow/Activity/Tools/CalculateArgon2Key.pm
 OpenXPKI/Server/Workflow/Activity/Tools/CalculateRequestHMAC.pm
@@ -440,6 +461,7 @@ OpenXPKI/Server/Workflow/Activity/Tools/Connector/GetValue.pm
 OpenXPKI/Server/Workflow/Activity/Tools/CopyCertificateMetadata.pm
 OpenXPKI/Server/Workflow/Activity/Tools/CopyContextFromWorkflow.pm
 OpenXPKI/Server/Workflow/Activity/Tools/CRLExport.pm
+OpenXPKI/Server/Workflow/Activity/Tools/Datapool/ClearNamespace.pm
 OpenXPKI/Server/Workflow/Activity/Tools/Datapool/DeleteEntry.pm
 OpenXPKI/Server/Workflow/Activity/Tools/Datapool/GetEntry.pm
 OpenXPKI/Server/Workflow/Activity/Tools/Datapool/ModifyEntry.pm
@@ -509,6 +531,7 @@ OpenXPKI/Server/Workflow/Condition/AlwaysFalse.pm
 OpenXPKI/Server/Workflow/Condition/AlwaysTrue.pm
 OpenXPKI/Server/Workflow/Condition/Approved.pm
 OpenXPKI/Server/Workflow/Condition/CertificateAttribute.pm
+OpenXPKI/Server/Workflow/Condition/CertificateHasAttribute.pm
 OpenXPKI/Server/Workflow/Condition/CertificateHasProfile.pm
 OpenXPKI/Server/Workflow/Condition/CertificateHasStatus.pm
 OpenXPKI/Server/Workflow/Condition/CertificateHasSuccessor.pm
@@ -592,7 +615,6 @@ OpenXPKI/Serialization/JSON.pm
 OpenXPKI/Serialization/Legacy.pm
 OpenXPKI/Service.pm
 OpenXPKI/Service/Default.pm
-OpenXPKI/Service/Default/CommandApi2.pm
 
 OpenXPKI/Service/LibSCEP.pm
 OpenXPKI/Service/LibSCEP/Command.pm
@@ -640,12 +662,12 @@ htdocs/assets/autoimport-165.js.LICENSE.txt
 htdocs/assets/autoimport-968-b6d3ace1e7ce5b08459c7178a056cf8e.js
 htdocs/assets/autoimport-968.js.LICENSE.txt
 htdocs/assets/autoimport-app-44a53b841248ae85ad2ffb537b9c882f.css
-htdocs/assets/autoimport-app-905648ebca92dff5356662342e207c5f.js
-htdocs/assets/autoimport-tests-fe6b708316ab8f534c3728f8b08788a0.js
+htdocs/assets/autoimport-app-f07140824e2b148d808ee2c62ba8aa32.js
+htdocs/assets/autoimport-tests-15093bca51ccbf9d152fa9be93c28d59.js
 htdocs/assets/bootstrap-v5-tweaks-eceba2603661927924740a0a5e1f57b3.css
 htdocs/assets/glyphicons-8dfa4dd41b8ab62e14cf32e7dd3756bc.css
-htdocs/assets/openxpki-084c5cbedca8b18ad5eee8ba2af999fc.js
 htdocs/assets/openxpki-6fa412c43753a002688fc3827060b637.css
+htdocs/assets/openxpki-8cf19f22b0cd24f69696356e31d6651b.js
 htdocs/assets/vendor-860a049e3d680c5daedbd1a5cc3f1858.css
 htdocs/assets/vendor-967b906859a561a52efe18612b0a1c5a.js
 htdocs/default.html

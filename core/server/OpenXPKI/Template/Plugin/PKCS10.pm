@@ -31,20 +31,10 @@ use base qw( Template::Plugin );
 use Template::Plugin;
 
 use Data::Dumper;
-use Digest::SHA qw(sha1_hex sha1_base64);
 use OpenXPKI::Crypt::PKCS10;
+use OpenXPKI::Crypt::DN;
 use OpenXPKI::Exception;
 use OpenXPKI::Server::Context qw( CTX );
-
-
-sub new {
-    my $class = shift;
-    my $context = shift;
-
-    return bless {
-    _CONTEXT => $context,
-    }, $class;
-}
 
 
 =head2 _load(pkcs10)
@@ -192,7 +182,8 @@ sub dn {
     my $csr = $self->_load($pkcs10);
     if (!$csr) { return; }
 
-    my $dn= OpenXPKI::DN->new($csr->get_subject())->get_hashed_content();
+    my $csr_subject = $csr->subjectSequence();
+    my $dn = OpenXPKI::Crypt::DN->new( sequence => $csr_subject )->as_hash();
 
     if (!$component) {
         return $dn;

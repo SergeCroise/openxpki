@@ -2,12 +2,13 @@
 # Provision a Vagrant box (VirtualBox VM) for testing and development:
 # Install SQLite client and set up database
 
-. /vagrant/assets/functions.sh
+ROOTDIR="$(dirname "$0")/.."; mountpoint -q /vagrant && ROOTDIR=/vagrant/assets
+. "$ROOTDIR/functions.sh"
 
 #
 # Config
 #
-SQLITE_PATH=/run-env/sqlite.db
+SQLITE_PATH=$OXI_CORE_DIR/sqlite.db
 rm -f $SQLITE_PATH
 touch $SQLITE_PATH
 chmod 0666 $SQLITE_PATH

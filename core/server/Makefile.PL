@@ -304,7 +304,7 @@ WriteMakefile(
         'Crypt::OpenSSL::AES'           => '0.02',      # e.g. OpenXPKI::Crypto::VolatileVault
         'CryptX'                        => '0.068',     # Crypt::* modules for key checking, Ciphers for Crypt::CBC
         'Crypt::JWT'                    => 0,
-        'Crypt::PKCS10'                 => '2.000',
+        'Crypt::PKCS10'                 => '2.005',
         'Crypt::Rijndael'               => '1.13',      # OpenXPKI::Crypto::Secret::SplitEncrypted, via Crypt::CBC
         'Crypt::X509'                   => '0.53',
         'Data::Serializer'              => '0.44',
@@ -320,6 +320,7 @@ WriteMakefile(
         'Devel::NYTProf'                => 0,           # CPAN
         'English'                       => '1',         # for broken Perl installations like on Ubuntu Drapper
         'Exception::Class'              => '1.22',
+        'Feature::Compat::Try'          => '0.05',
         'File::Which'                   => '1.27',      # docker-test.pl
         'HTML::Entities'                => 0,
         'Import::Into'                  => '1.002005',  # OpenXPKI::Debug
@@ -337,6 +338,7 @@ WriteMakefile(
         'MooseX::InsideOut'             => '0.106',     # OpenXPKI::Crypto::Secret::Split etc.
         'MooseX::NonMoose'              => 0,           # OpenXPKI::Server::Workflow::Validator::PasswordQuality
         'MooseX::Params::Validate'      => '0.21',      # OpenXPKI::Server::Database
+        'MooseX::StrictConstructor'     => '0.21',
         'Net::DNS'                      => '0.83',
         'Net::LDAP'                     => '0.32',
         'Net::Server'                   => '0.94',
