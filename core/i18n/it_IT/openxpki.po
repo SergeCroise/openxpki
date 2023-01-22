@@ -35,6 +35,10 @@ msgid "I18N_OPENXPKI_UI_APPROVAL_RULE_DOMAIN_VALIDATION_LABEL"
 msgstr "Richiesta di Revoca"
 
 #, fuzzy
+msgid "I18N_OPENXPKI_UI_APPROVAL_RULE_IP_VALIDATION_LABEL"
+msgstr "Token Datasafe"
+
+#, fuzzy
 msgid "I18N_OPENXPKI_UI_AUTHENTICATION_FAILED"
 msgstr "Workflow"
 
@@ -405,6 +409,11 @@ msgstr "sconosciuto"
 
 msgid "I18N_OPENXPKI_UI_CERT_STATUS_VALID"
 msgstr "Valido"
+
+# Remove?
+#, fuzzy
+msgid "I18N_OPENXPKI_UI_CERT_SUBJECT_PARTS"
+msgstr "Stato del Certificato"
 
 #, fuzzy
 msgid "I18N_OPENXPKI_UI_CLEAR_LOGIN"
@@ -2045,6 +2054,10 @@ msgid "I18N_OPENXPKI_UI_VALIDATOR_CONNECTOR_CHECK_FAILED"
 msgstr "Fallita convalida dell’espressione data"
 
 #, fuzzy
+msgid "I18N_OPENXPKI_UI_VALIDATOR_CONNECTOR_EXCEPTION"
+msgstr "Fallita convalida dell’espressione data"
+
+#, fuzzy
 msgid "I18N_OPENXPKI_UI_VALIDATOR_EMPTY_BUT_REQUIRED"
 msgstr "Uno o più campi Soggetto contengono errori."
 
@@ -2910,6 +2923,10 @@ msgstr "Approvazioni"
 
 #, fuzzy
 msgid "I18N_OPENXPKI_UI_WORKFLOW_FIELD_APPROVAL_ERRORS_LABEL"
+msgstr "Approvazioni"
+
+#, fuzzy
+msgid "I18N_OPENXPKI_UI_WORKFLOW_FIELD_APPROVAL_REPORTS_LABEL"
 msgstr "Approvazioni"
 
 #, fuzzy

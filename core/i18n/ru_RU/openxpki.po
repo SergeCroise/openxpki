@@ -34,6 +34,10 @@ msgid "I18N_OPENXPKI_UI_APPROVAL_RULE_DOMAIN_VALIDATION_LABEL"
 msgstr "Пауза"
 
 #, fuzzy
+msgid "I18N_OPENXPKI_UI_APPROVAL_RULE_IP_VALIDATION_LABEL"
+msgstr "Профиль TLS сервера "
+
+#, fuzzy
 msgid "I18N_OPENXPKI_UI_AUTHENTICATION_FAILED"
 msgstr "Профиль пользователя общего назначения"
 
@@ -417,6 +421,10 @@ msgstr "Статус сертификата УЦ"
 #, fuzzy
 msgid "I18N_OPENXPKI_UI_CERT_STATUS_VALID"
 msgstr "Действителен"
+
+#, fuzzy
+msgid "I18N_OPENXPKI_UI_CERT_SUBJECT_PARTS"
+msgstr "Субъект"
 
 #, fuzzy
 msgid "I18N_OPENXPKI_UI_CLEAR_LOGIN"
@@ -2271,6 +2279,10 @@ msgid "I18N_OPENXPKI_UI_VALIDATOR_CONNECTOR_CHECK_FAILED"
 msgstr "SPKAC-строка пуста."
 
 #, fuzzy
+msgid "I18N_OPENXPKI_UI_VALIDATOR_CONNECTOR_EXCEPTION"
+msgstr "SPKAC-строка пуста."
+
+#, fuzzy
 msgid "I18N_OPENXPKI_UI_VALIDATOR_EMPTY_BUT_REQUIRED"
 msgstr "SPKAC-строка пуста."
 
@@ -3141,6 +3153,10 @@ msgstr "Дочерние технологические процессы"
 
 #, fuzzy
 msgid "I18N_OPENXPKI_UI_WORKFLOW_FIELD_APPROVAL_ERRORS_LABEL"
+msgstr "Дочерние технологические процессы"
+
+#, fuzzy
+msgid "I18N_OPENXPKI_UI_WORKFLOW_FIELD_APPROVAL_REPORTS_LABEL"
 msgstr "Дочерние технологические процессы"
 
 #, fuzzy
@@ -15319,10 +15335,6 @@ msgstr "Имя учетной записи"
 #, fuzzy
 #~ msgid "I18N_OPENXPKI_WF_VAL_CERTSUBJECTALTNAMEPARTS"
 #~ msgstr "Изменить альтернативное имя в заявке"
-
-#, fuzzy
-#~ msgid "I18N_OPENXPKI_WF_VAL_CERTSUBJECTPARTS"
-#~ msgstr "Субъект"
 
 #, fuzzy
 #~ msgid "I18N_OPENXPKI_WF_VAL_CREATOR"

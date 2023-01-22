@@ -30,6 +30,10 @@ msgid "I18N_OPENXPKI_UI_APPROVAL_RULE_DOMAIN_VALIDATION_LABEL"
 msgstr "证书吊销请求"
 
 #, fuzzy
+msgid "I18N_OPENXPKI_UI_APPROVAL_RULE_IP_VALIDATION_LABEL"
+msgstr "人员（安全电子邮件/身份验证）"
+
+#, fuzzy
 msgid "I18N_OPENXPKI_UI_AUTHENTICATION_FAILED"
 msgstr "吊销ID"
 
@@ -337,6 +341,11 @@ msgstr "未知"
 
 msgid "I18N_OPENXPKI_UI_CERT_STATUS_VALID"
 msgstr "有效"
+
+# Remove?
+#, fuzzy
+msgid "I18N_OPENXPKI_UI_CERT_SUBJECT_PARTS"
+msgstr "证书状态"
 
 msgid "I18N_OPENXPKI_UI_CLEAR_LOGIN"
 msgstr "重置登录"
@@ -1757,6 +1766,10 @@ msgstr "根据信息创建的通用名称超过了允许的64个字符的长度�
 msgid "I18N_OPENXPKI_UI_VALIDATOR_CONNECTOR_CHECK_FAILED"
 msgstr "无法根据给定的后端检查值"
 
+#, fuzzy
+msgid "I18N_OPENXPKI_UI_VALIDATOR_CONNECTOR_EXCEPTION"
+msgstr "无法根据给定的后端检查值"
+
 msgid "I18N_OPENXPKI_UI_VALIDATOR_EMPTY_BUT_REQUIRED"
 msgstr "必填字段为空"
 
@@ -2504,6 +2517,10 @@ msgstr "批准"
 
 #, fuzzy
 msgid "I18N_OPENXPKI_UI_WORKFLOW_FIELD_APPROVAL_ERRORS_LABEL"
+msgstr "批准"
+
+#, fuzzy
+msgid "I18N_OPENXPKI_UI_WORKFLOW_FIELD_APPROVAL_REPORTS_LABEL"
 msgstr "批准"
 
 #, fuzzy
