@@ -1,8 +1,13 @@
 package OpenXPKI::Client::UI::Handle::Profile;
-
 use Moose;
-use Data::Dumper;
+
 use English;
+
+# Core modules
+use Data::Dumper;
+use List::Util qw( any first );
+
+# Project modules
 use OpenXPKI::Serialization::Simple;
 use OpenXPKI::i18n qw( i18nGettext );
 
@@ -14,62 +19,72 @@ sub render_profile_select {
     my $wf_action = shift;
     my $param = shift || '';
 
-    my %extra = split /!/, $param;
-
-    $self->logger()->trace( 'render_profile_select with args: ' . Dumper $args ) if $self->logger->is_trace;
+    $self->logger->trace('render_profile_select with args: ' . Dumper $args) if $self->logger->is_trace;
 
     my $wf_info = $args->{wf_info};
-
-    # Get the list of profiles from the backend - return is a hash with id => hash
-    my $profiles = $self->send_command_v2( 'get_cert_profiles', \%extra );
-    # Transform hash into value/label list and sort it
-    # Apply translation to sort on translated strings
-    map { $profiles->{$_}->{label} = i18nGettext($profiles->{$_}->{label}) } keys %{$profiles};
-    # Sort
-    my @profiles = sort { lc($a->{label}) cmp lc($b->{label}) } values %{$profiles};
-
-    my @profiledesc = map { $_->{description} ? { value => $_->{description}, label => $_->{label} } : () } @profiles;
-
     my $context = $wf_info->{workflow}->{context};
+    my @profiledesc;
 
-    my $cert_profile = $context->{cert_profile} || '';
+    # fetch field definition for subject styles (used for all sub selects aka. dependants)
+    my $style_field = first { $_->{name} eq 'cert_subject_style' } $wf_info->{activity}->{$wf_action}->{field}->@*;
+    my ($style_item, @more_style_items) = $self->__render_input_field({
+        $style_field->%*,
+        required => 1,          # backward compatibility: overwrite legacy config "required: 0"
+        placeholder => undef,   # backward compatibility: overwrite legacy empty " " placeholder now that we preselect the first (default) style
+    }) if $style_field;
 
-    # If the profile is preselected, we need to fetch the options
-    my @styles;
-    if ($cert_profile) {
-        my $styles = $self->send_command_v2( 'get_cert_subject_profiles', { profile => $cert_profile });
-        @styles = sort { lc($a->{value}) cmp lc($b->{value}) } values %{$styles};
-    } else {
-        @styles = ({ value => '', label => 'I18N_OPENXPKI_UI_PROFILE_CHOOSE_PROFILE_FIRST'});
-    }
-
+    # loop through action input fields
     my @fields;
-    foreach my $field (@{$wf_info->{activity}->{$wf_action}->{field}}) {
+    foreach my $field ($wf_info->{activity}->{$wf_action}->{field}->@*) {
         my $name = $field->{name};
-        my ($item, @more_items) = $self->__render_input_field( $field, $context->{$name} );
+
+        # subject styles are already processed outside this loop
+        next if 'cert_subject_style' eq $name;
+
+        # get field definition
+        my ($item, @more_items) = $self->__render_input_field($field, $context->{$name});
         next unless ($item);
 
-        if ($name eq 'cert_profile') {
-            $item = {
-                %{$item},
-                options => \@profiles,
-                actionOnChange => 'profile!get_styles_for_profile',
-                prompt => $item->{placeholder}, # TODO - rename in UI
-            };
-        } elsif ($name eq 'cert_subject_style') {
-            $item = {
-                %{$item},
-                options => \@styles,
-                prompt => $item->{placeholder}, # TODO - rename in UI
-            };
+        if ('cert_profile' eq $name) {
+            # Get profiles from backend: { id => { ... }, id => { ... } }
+            my $profiles = $self->send_command_v2(get_cert_profiles => { with_subject_styles => 1 });
+
+            # Transform hash into list and sort it
+            # Apply translation to sort on translated strings
+            my @profiles = ();
+            for my $p (values $profiles->%*) {
+                $p->{label} = i18nGettext($p->{label}); # to be able to sort it
+                if ($style_field and my $subject_styles = delete $p->{subject_styles}) {
+                    # sort subject style and add them as options to dependent select field
+                    my @styles = sort { lc($a->{value}) cmp lc($b->{value}) } values $subject_styles->%*;
+                    $p->{dependants} = [
+                        # dependent style select field
+                        {
+                            $style_item->%*, # copy item config
+                            options => \@styles,
+                            value => $styles[0]->{value}, # preselect first (default) style
+                        },
+                        # maybe more (hidden) fields
+                        @more_style_items,
+                    ];
+                }
+                push @profiles, $p;
+            }
+            @profiles = sort { lc($a->{label}) cmp lc($b->{label}) } @profiles;
+
+            @profiledesc =
+                map { { value => $_->{description}, label => $_->{label} } }
+                grep { $_->{description} }
+                @profiles;
+
+            $item->{options} = \@profiles;
         }
 
         push @fields, $item, @more_items;
     }
 
-
     # record the workflow info in the session
-    push @fields, $self->__register_wf_token($wf_info, {
+    push @fields, $self->__wf_token_field($wf_info, {
         wf_action => $wf_action,
         wf_fields => \@fields,
     });
@@ -80,7 +95,10 @@ sub render_profile_select {
     );
     $form->add_field(%{ $_ }) for @fields;
 
-    if (@profiledesc > 0) {
+    #
+    # Show description section if there are any profile descriptions
+    #
+    if (scalar @profiledesc > 0) {
         $self->main->add_section({
             type => 'keyvalue',
             content => {
@@ -94,7 +112,6 @@ sub render_profile_select {
 
 }
 
-
 sub render_subject_form {
 
     my $class = shift; # static call
@@ -104,9 +121,11 @@ sub render_subject_form {
     my $param = shift;
 
     my %extra;
+    # Parameters given in config via:
+    #   uihandle: OpenXPKI::Client::UI::Handle::Profile::render_subject_form!mode!renewal
     if ($param) {
         my @param = split /!/, $param;
-        # Legacy format, section only
+        # TODO Legacy format, section only
         if (@param == 1) {
             $extra{'section'} = $param[0];
         } elsif (@param == 2 && $param[0] =~ m{(section|mode)}) {
@@ -115,58 +134,116 @@ sub render_subject_form {
             %extra = @param;
         }
     }
+    $self->logger->trace("Additional parameters via 'uihandle' config: " . Dumper \%extra) if (scalar keys %extra and $self->logger->is_trace);
 
     my $section = $extra{'section'};
-    my $mode = $extra{'mode'} || 'enroll';
+    my $is_renewal = ($extra{'mode'}//'' eq 'renewal');
 
+    # Workflow info
     my $wf_info = $args->{wf_info};
-
     my $context = $wf_info->{workflow}->{context};
 
-    # get profile and style from the context
+    # Profile and style from context
     my $cert_profile = $context->{'cert_profile'};
     my $cert_subject_style = $context->{'cert_subject_style'};
 
-    my $is_renewal = ($mode eq 'renewal');
+    # Parse out the field name and type, we assume that there is only one activity
+    $wf_action = (keys %{$wf_info->{activity}})[0] unless $wf_action;
 
-    # Parse out the field name and type, we assume that there is only one activity with one field
-    $wf_action = (keys %{$wf_info->{activity}})[0] unless($wf_action);
-    my $field_name = $wf_info->{activity}->{$wf_action}->{field}[0]->{name};
+    # Safety check
+    die "Could not determine current workflow action" unless $wf_action;
 
-    $section = substr($wf_info->{activity}->{$wf_action}->{field}[0]->{type}, 5) unless($section);
+    my %field2section = (
+        cert_info => 'info',
+        cert_subject_parts => 'subject',
+        cert_san_parts => 'san',
+    );
 
-    $self->logger()->debug( " Render subject for $field_name, section $section in $wf_action" );
+    my $parent_name;
 
-    # Allowed types are cert_subject, cert_san, cert_info
-    my $fields = $self->send_command_v2('get_field_definition' => {
-        profile => $cert_profile, style => $cert_subject_style, 'section' => $section,
+    # Detect field to get section if not already set
+    # TODO Set field type in config as argument to "uihandle" and remove field detection
+    for my $field ($wf_info->{activity}->{$wf_action}->{field}->@*) {
+        if (my $detected_section = $field2section{ $field->{name} }) {
+            $parent_name = $field->{name};
+            if (not $section) {
+                $self->logger->debug("Field '$parent_name' detected - setting profile section to '$detected_section'");
+                $section = $detected_section;
+            } else {
+                if ($section ne $detected_section) {
+                    $self->logger->warn("Mismatch between section detected via field '$parent_name' and uihandle parameter: '$detected_section' != '$section'");
+                }
+            }
+            last;
+        }
+    }
+
+    # Safety check
+    die "Could not determine current UI section" unless $section;
+    die "Invalid UI section: $section" unless any { $_ eq $section } qw( info subject san );
+
+    $self->logger->debug("Render subject for '$parent_name', section '$section' in '$wf_action'");
+
+    # Allowed types are info, subject, san
+    my $profile_fields = $self->send_command_v2(get_field_definition => {
+        profile => $cert_profile,
+        style => $cert_subject_style,
+        section => $section,
     });
-
-    $self->logger()->trace( 'Profile fields' . Dumper $fields ) if $self->logger->is_trace;
 
     # Load preexisiting values from context
     my $values = {};
-    if ($context->{$field_name}) {
-        $values = $self->serializer()->deserialize( $context->{$field_name} );
+    if ($context->{$parent_name}) {
+        $values = $self->serializer->deserialize( $context->{$parent_name} );
     }
-
+    $self->logger->trace('Presets: ' . Dumper $values) if $self->logger->is_trace;
 
     my @fielddesc;
-    foreach my $field (@{$fields}) {
-        push @fielddesc, { label => $field->{label}, value => $field->{description}, format => 'raw' } if ($field->{description});
+    my @fields;
+    foreach my $field (@{$profile_fields}) {
+        my $name = $field->{name};
+
+        # description
+        push @fielddesc, {
+            label => $field->{label},
+            value => $field->{description},
+            format => 'raw',
+        } if $field->{description};
+
+        # translate field names in "keys" and adjust parent name
+        if ($field->{keys}) {
+            $field->{name} = $parent_name.'{*}'; # this "parent" field name will not be sent in requests by the web UI
+            for my $variant (@{$field->{keys}}) {
+                $variant->{value} = sprintf('%s{%s}', $parent_name, $variant->{value}), # search tag: #wf_fields_with_sub_items
+            }
+        }
+        # translate field name to include "parent"
+        else {
+            $field->{name} = sprintf('%s{%s}', $parent_name, $name); # search tag: #wf_fields_with_sub_items
+        }
+
+        # web UI field spec
+        my ($item, @more_items) = $self->__render_input_field($field, $values->{$name});
+        next unless $item;
+
+        # renewal policy - after __render_input_field() because value might get overridden
+        if ($is_renewal) {
+            if ($field->{renew} eq 'clear') {
+                $item->{value} = undef;
+            } elsif ($field->{renew} eq 'keep') {
+                $item->{type} = 'static';
+            }
+        }
+
+        $self->logger->trace("Field '$name': transformed to web ui spec = " . Dumper $item) if $self->logger->is_trace;
+
+        push @fields, $item, @more_items;
     }
 
-    $self->logger()->trace( 'Preset ' . Dumper $values ) if $self->logger->is_trace;
-
-    # Map the old notation for the new UI
-    $fields = OpenXPKI::Client::UI::Handle::Profile::__translate_form_def( $fields, $field_name, $values, $is_renewal );
-
-    $self->logger()->trace( 'Mapped fields' . Dumper $fields ) if $self->logger->is_trace;
-
     # record the workflow info in the session
-    push @{$fields}, $self->__register_wf_token($wf_info, {
+    push @fields, $self->__wf_token_field($wf_info, {
         wf_action => $wf_action,
-        wf_fields => $fields,
+        wf_fields => \@fields, # search tag: #wf_fields_with_sub_items
     });
 
     my $form = $self->main->add_form(
@@ -174,7 +251,7 @@ sub render_subject_form {
         submit_label => 'I18N_OPENXPKI_UI_WORKFLOW_SUBMIT_BUTTON',
         buttons => $self->__get_form_buttons( $wf_info ),
     );
-    $form->add_field(%{ $_ }) for @{ $fields };
+    $form->add_field(%{ $_ }) for @fields;
 
     if (@fielddesc) {
         $self->main->add_section({
@@ -197,60 +274,89 @@ sub render_key_select {
     my $args = shift;
     my $wf_action = shift;
 
-    $self->logger()->trace( 'render_profile_select with args: ' . Dumper $args ) if $self->logger->is_trace;
+    $self->logger()->trace( 'render_key_select with args: ' . Dumper $args ) if $self->logger->is_trace;
 
     my $wf_info = $args->{wf_info};
     my $context = $wf_info->{workflow}->{context};
 
-    # Get the list of allowed algorithms
-    my $key_alg = $self->send_command_v2( 'get_key_algs', { profile => $context->{cert_profile} });
-    my @key_type;
-    foreach my $alg (@{$key_alg}) {
-       push @key_type, { label => 'I18N_OPENXPKI_UI_KEY_ALG_'.uc($alg) , value => $alg };
-    }
-
-    my $key_gen_param_names = $self->send_command_v2( 'get_key_params', { profile => $context->{cert_profile} });
-
-    # current values from context when changing values!
-    my $key_gen_param_values = $context->{key_gen_params} ? $self->serializer()->deserialize( $context->{key_gen_params} ) : {};
-
-    # Encryption
-    my $key_enc = $self->send_command_v2( 'get_key_enc', { profile => $context->{cert_profile} });
-    my @enc = map { { value => $_, label => 'I18N_OPENXPKI_UI_KEY_ENC_'.uc($_)  }  } @{$key_enc};
+    my $key_gen_params_field = first { $_->{name} eq 'key_gen_params' } $wf_info->{activity}->{$wf_action}->{field}->@*;
 
     my @fields;
-    FIELDS:
+
     foreach my $field (@{$wf_info->{activity}->{$wf_action}->{field}}) {
         my $name = $field->{name};
 
-        if ($name eq 'key_gen_params') {
-            foreach my $pn (@{$key_gen_param_names}) {
-                $pn = uc($pn);
-                # We create the label as I18 string from the param name
-                my $label = 'I18N_OPENXPKI_UI_KEY_'.$pn;
-                push @fields, {
-                    name => "key_gen_params{$pn}",
-                    label => $label,
-                    value => $key_gen_param_values->{ $pn },
-                    type => 'select',
-                    options => []
-                };
-            }
-            next FIELDS;
-        }
+        # key_gen_params is processed as part of key_alg
+        next if 'key_gen_params' eq $name;
 
-        my ($item, @more_items) = $self->__render_input_field( $field );
-        next FIELDS unless ($item);
+        # get field definition
+        my ($item, @more_items) = $self->__render_input_field($field);
+        next unless $item;
 
-        $item->{prompt} = $item->{placeholder}; # TODO - rename in UI
         if ($name eq 'key_alg') {
-            $item = {
-                %{$item},
-                options => \@key_type,
-                actionOnChange => 'profile!get_key_param'
-            };
+            # Get the list of allowed algorithms
+            my $key_algs = $self->send_command_v2('get_key_algs', { profile => $context->{cert_profile} });
+
+            my @key_alg_options = ();
+            for my $alg_name ($key_algs->@*) {
+                my $alg = {
+                    label => 'I18N_OPENXPKI_UI_KEY_ALG_'.uc($alg_name),
+                    value => $alg_name,
+                };
+
+                #
+                # add dependent select fields for parameters
+                #
+                if ($key_gen_params_field) {
+                    # NOTE that we do not call __render_input_field() for "key_gen_params", i.e.
+                    # we do not read the field spec from the configuration.
+                    # This is because the single "virtual" field "key_gen_params" is expanded
+                    # into multiple <select> fields for each parameter.
+                    my $params = $self->send_command_v2('get_key_params', { profile => $context->{cert_profile}, alg => $alg_name });
+                    my $param_presets = $self->param('key_gen_params');
+
+                    my @param_fields;
+                    for my $param_name (keys $params->%*) {
+                        my @options = $params->{$param_name}->@*;
+                        $param_name = uc($param_name);
+
+                        # preset from context (default to first item if context value is unknown)
+                        my $preset = $param_presets->{$param_name} // '';
+                        if (not any { $_ eq $preset } @options) {
+                            $preset = $options[0];
+                        }
+
+                        my @option_items =
+                            map { {
+                                value => $_,
+                                label => "I18N_OPENXPKI_UI_KEY_${param_name}_".uc($_),
+                            } }
+                            @options;
+
+                        my $param_field = {
+                            name => "key_gen_params{${param_name}}",
+                            label => "I18N_OPENXPKI_UI_KEY_${param_name}",
+                            value => $preset,
+                            type => 'select',
+                            options => \@option_items,
+                        };
+
+                        push @param_fields, $param_field;
+                    }
+
+                    $alg->{dependants} = \@param_fields;
+                }
+
+                push @key_alg_options, $alg;
+            }
+
+            $item->{options} = \@key_alg_options
+
         } elsif ($name eq 'enc_alg') {
+            my $key_enc = $self->send_command_v2('get_key_enc', { profile => $context->{cert_profile} });
+            my @enc = map { { value => $_, label => 'I18N_OPENXPKI_UI_KEY_ENC_'.uc($_)  }  } @{$key_enc};
             $item->{options} = \@enc;
+
         } elsif ($name eq 'csr_type') {
              $item->{value} = 'pkcs10';
         }
@@ -259,10 +365,9 @@ sub render_key_select {
     }
 
     # record the workflow info in the session
-    push @fields, $self->__register_wf_token($wf_info, {
+    push @fields, $self->__wf_token_field($wf_info, {
         wf_action => $wf_action,
-        wf_fields => \@fields,
-        cert_profile => $context->{cert_profile}
+        wf_fields => \@fields, # search tag: #wf_fields_with_sub_items
     });
 
     my $form = $self->main->add_form(
@@ -329,7 +434,7 @@ sub render_server_password {
     }
 
     # record the workflow info in the session
-    push @fields, $self->__register_wf_token($wf_info, {
+    push @fields, $self->__wf_token_field($wf_info, {
         wf_action =>  $wf_action,
         wf_fields => \@fields,
         cert_profile => $context->{cert_profile}
@@ -342,85 +447,6 @@ sub render_server_password {
     $form->add_field(%{ $_ }) for @fields;
 
     return $self;
-
-}
-
-
-sub __translate_form_def {
-
-    my $fields = shift;
-    my $field_name = shift;
-    my $values = shift;
-    my $is_renewal = shift || 0;
-
-    # TODO - Refactor profile definitions to make this obsolete
-    my @fields;
-    foreach my $field (@{$fields}) {
-
-        my $renew = $is_renewal ? ($field->{renew} || 'preset') : '';
-
-        my $new = {
-            name => $field_name.'{'.$field->{id}.'}',
-            label => $field->{label},
-            tooltip => defined $field->{tooltip} ? $field->{tooltip} : $field->{description},
-             # Placeholder is the new attribute, fallback to old default
-            placeholder => (defined $field->{placeholder} ? $field->{placeholder} : $field->{default}),
-            value => $values->{$field->{id}},
-        };
-        $new->{ecma_match} = $field->{ecma_match} if $field->{ecma_match};
-
-        $field->{type} //= '';
-        if ($field->{type} eq 'select') {
-            $new->{type} = 'select';
-            $new->{options} = $field->{options};
-        } elsif ($field->{type} =~ m{static|textarea|datetime}) {
-               $new->{type} = $field->{type};
-        } else {
-            $new->{type} = 'text';
-        }
-
-        # reasons to make the field optional
-        if ((defined $field->{min} && $field->{min} == 0)
-            || (defined $field->{required} && $field->{required} eq '0')
-            || ($field->{type} eq 'static')) {
-            $new->{is_optional} = 1;
-        }
-
-        if ($field->{min}) {
-            $new->{min} = $field->{min};
-            $new->{clonable} = 1;
-        }
-
-        if (defined $field->{max}) {
-            $new->{max} = $field->{max};
-            $new->{clonable} = 1;
-        }
-
-        # Check for key/value field
-        if ($field->{keys}) {
-            $new->{name} =  $field_name.'{*}';
-            my $format = $field_name.'{%s}';
-
-            my @keys = map { {
-                value => sprintf ($format, $_->{value}),
-                label => $_->{label}
-            } } @{$field->{keys}};
-            $new->{keys} = \@keys;
-        }
-
-        if ($renew eq 'clear') {
-            $new->{value} = undef;
-
-        } elsif ($renew eq 'keep') {
-            $new->{type} = 'static';
-
-        }
-
-        push @fields, $new;
-
-    }
-
-    return \@fields;
 
 }
 

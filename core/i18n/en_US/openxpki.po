@@ -3,7 +3,7 @@ msgstr ""
 "Project-Id-Version: OpenXPKI 3.0\n"
 "Report-Msgid-Bugs-To: \n"
 "POT-Creation-Date: 2004-09-08 14:02+0200\n"
-"PO-Revision-Date: 2023-01-18 15:22+0100\n"
+"PO-Revision-Date: 2024-05-21 14:33+0200\n"
 "Last-Translator: OpenXPKI Team <i18n@openxpki.org>\n"
 "Language-Team: OpenXPKI developers list <openxpki-devel@lists.sourceforge."
 "net>\n"
@@ -11,11 +11,26 @@ msgstr ""
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"X-Generator: Poedit 3.0.1\n"
+"X-Generator: Poedit 3.2.2\n"
 "X-Poedit-Bookmarks: -1,-1,77,-1,-1,-1,-1,-1,-1,-1\n"
+
+msgid "I18N_OPENXPKI_UI_ACCOUNT_CONTACT_INFORMATION_LABEL"
+msgstr "Contact Information"
+
+msgid "I18N_OPENXPKI_UI_ACCOUNT_ID_LABEL"
+msgstr "Account ID"
+
+msgid "I18N_OPENXPKI_UI_ACCOUNT_KEY_LABEL"
+msgstr "Account Key"
+
+msgid "I18N_OPENXPKI_UI_ACCOUNT_STATUS_LABEL"
+msgstr "Account State"
 
 msgid "I18N_OPENXPKI_UI_ACTION_NOT_FOUND"
 msgstr "Requested action not found"
+
+msgid "I18N_OPENXPKI_UI_API_TOKEN"
+msgstr "API-Token/Secret"
 
 msgid "I18N_OPENXPKI_UI_APPLICATION_ERROR"
 msgstr "Unknown application error"
@@ -47,11 +62,27 @@ msgstr "Backend session terminated - please re-login"
 msgid "I18N_OPENXPKI_UI_BACKEND_UNREACHABLE"
 msgstr "Backend service is not reachable or not responding"
 
+#, fuzzy
+msgid "I18N_OPENXPKI_UI_BLAH"
+msgstr "No"
+
 msgid "I18N_OPENXPKI_UI_BULK_APPROVE_CRR_LABEL"
 msgstr "Approve Revocation"
 
 msgid "I18N_OPENXPKI_UI_BULK_APPROVE_CSR_LABEL"
 msgstr "Approve Request"
+
+msgid "I18N_OPENXPKI_UI_BULK_FAILED_WORKFLOW_DESCRIPTION"
+msgstr "Resume or discard workflows in exception state."
+
+msgid "I18N_OPENXPKI_UI_BULK_FAILED_WORKFLOW_LABEL"
+msgstr "Failed Workflows"
+
+msgid "I18N_OPENXPKI_UI_BULK_PAUSED_WORKFLOW_DESCRIPTION"
+msgstr "Wakeup or discard workflows in paused state."
+
+msgid "I18N_OPENXPKI_UI_BULK_PAUSED_WORKFLOW_LABEL"
+msgstr "Paused Workflows"
 
 msgid "I18N_OPENXPKI_UI_BULK_PENDING_REQUEST_DESCRIPTION"
 msgstr "Bulk approve or reject outstanding certificate signing requests."
@@ -73,6 +104,12 @@ msgstr "Reject Selected"
 
 msgid "I18N_OPENXPKI_UI_BULK_REJECT_CSR_LABEL"
 msgstr "Reject Selected"
+
+msgid "I18N_OPENXPKI_UI_BUTTON_ACME_APPROVE_ACCOUNT_LABEL"
+msgstr "Approve Account"
+
+msgid "I18N_OPENXPKI_UI_BUTTON_ACME_REVOKE_ACCOUNT_LABEL"
+msgstr "Revoke Account"
 
 msgid "I18N_OPENXPKI_UI_CERTIFICATE_BY_IDENTIFIER_OR_SERIAL"
 msgstr ""
@@ -279,7 +316,7 @@ msgid "I18N_OPENXPKI_UI_CERTIFICATE_VALIDITY_VALID_AT"
 msgstr "valid at"
 
 msgid "I18N_OPENXPKI_UI_CERT_ACTION_AUTHORIZE"
-msgstr "Authorize"
+msgstr "Request <b>authorization</b> as registrar"
 
 msgid "I18N_OPENXPKI_UI_CERT_ACTION_ESCROW_KEY"
 msgstr "Download key restore file."
@@ -306,6 +343,9 @@ msgid "I18N_OPENXPKI_UI_CERT_EXPORT_EXCEEDS_LIMIT"
 msgstr ""
 "Result set is larger than the export limit, some result items are not "
 "included in this list!"
+
+msgid "I18N_OPENXPKI_UI_CERT_ISSUER_UNKNOWN"
+msgstr "Certificate issuer is unknown"
 
 msgid "I18N_OPENXPKI_UI_CERT_RELATED_HINT"
 msgstr "Show related workflows"
@@ -337,9 +377,6 @@ msgstr "unknown"
 msgid "I18N_OPENXPKI_UI_CERT_STATUS_VALID"
 msgstr "Valid"
 
-msgid "I18N_OPENXPKI_UI_CERT_SUBJECT_PARTS"
-msgstr "Subject Parts"
-
 msgid "I18N_OPENXPKI_UI_CLEAR_LOGIN"
 msgstr "Reset Login"
 
@@ -352,11 +389,22 @@ msgstr "Lookup in CMDB failed!"
 msgid "I18N_OPENXPKI_UI_CONFIG_STATUS_LABEL"
 msgstr "Config Version"
 
+msgid "I18N_OPENXPKI_UI_CONFIRM_DELETE_DESC"
+msgstr ""
+"Please confirm the deletion of the selected items. This action can not be "
+"undone!"
+
+msgid "I18N_OPENXPKI_UI_CONFIRM_DELETE_LABEL"
+msgstr "Confirm Delete"
+
 msgid "I18N_OPENXPKI_UI_CRL_BACK_TO_LIST"
 msgstr "back to overview"
 
 msgid "I18N_OPENXPKI_UI_CRL_CURRENT_LISTS"
 msgstr "Current revocation lists"
+
+msgid "I18N_OPENXPKI_UI_CRL_EXPIRED"
+msgstr "CRL expired - update required!"
 
 msgid "I18N_OPENXPKI_UI_CRL_ISSUER"
 msgstr "CRL Issuer"
@@ -376,8 +424,14 @@ msgstr "show older revocation lists"
 msgid "I18N_OPENXPKI_UI_CRL_LIST_VIEW_DETAIL"
 msgstr "Certificate Revocation List"
 
+msgid "I18N_OPENXPKI_UI_CRL_NEARLY_EXPIRED"
+msgstr "CRL is near expiration - update recommended!"
+
 msgid "I18N_OPENXPKI_UI_CRL_NEXT_UPDATE"
 msgstr "Next Update / Expires"
+
+msgid "I18N_OPENXPKI_UI_CRL_NONE"
+msgstr "No CRL found!"
 
 msgid "I18N_OPENXPKI_UI_CRL_NONE_FOR_CA"
 msgstr "No CRLs have been issued by this authority, yet."
@@ -415,9 +469,10 @@ msgstr "Challenge password"
 msgid "I18N_OPENXPKI_UI_CSR_KEY_GENERATION_FAILED"
 msgstr "Key generation failed"
 
-#, fuzzy
 msgid "I18N_OPENXPKI_UI_CUST_WORKFLOW_FIELD_REVOCATION_REASON_OPTION"
-msgstr "This is just a prefix"
+msgstr ""
+"This is just a "
+"prefixI18N_OPENXPKI_UI_WORKFLOW_STATE_PREREG_DELETE_INITIAL_DESCI18N_OPENXPKI_UI_WORKFLOW_STATE_PREREG_DELETE_INITIAL_DESC"
 
 #, fuzzy
 msgid "I18N_OPENXPKI_UI_CUST_WORKFLOW_FIELD_REVOCATION_REASON_OPTION_CERT"
@@ -430,6 +485,82 @@ msgstr "unspecified / other reason"
 #, fuzzy
 msgid "I18N_OPENXPKI_UI_CUST_WORKFLOW_FIELD_REVOCATION_REASON_OPTION_KEY"
 msgstr "This is just a prefix"
+
+msgid "I18N_OPENXPKI_UI_DATAPOOL_ACME_ACCOUNT_LABEL"
+msgstr "ACME Account Information (NICE)"
+
+msgid "I18N_OPENXPKI_UI_DATAPOOL_ACME_REGISTRATION_LABEL"
+msgstr "ACME Account Registrations (Endpoints)"
+
+msgid "I18N_OPENXPKI_UI_DATAPOOL_CRYPTO_KEYS_LABEL"
+msgstr "Cryptographic Keys"
+
+msgid "I18N_OPENXPKI_UI_DATAPOOL_DELETE_ENTRY"
+msgstr "Delete"
+
+msgid "I18N_OPENXPKI_UI_DATAPOOL_ENCRYPTED"
+msgstr "Format"
+
+msgid "I18N_OPENXPKI_UI_DATAPOOL_ENCRYPTED_NO"
+msgstr "plain"
+
+msgid "I18N_OPENXPKI_UI_DATAPOOL_ENCRYPTED_YES"
+msgstr "encrypted"
+
+msgid "I18N_OPENXPKI_UI_DATAPOOL_EXPIRATION_DATE"
+msgstr "Expiration"
+
+msgid "I18N_OPENXPKI_UI_DATAPOOL_EXPIRES_AFTER"
+msgstr "Expires after"
+
+msgid "I18N_OPENXPKI_UI_DATAPOOL_EXPIRES_BEFORE"
+msgstr "Expires before"
+
+msgid "I18N_OPENXPKI_UI_DATAPOOL_KEY"
+msgstr "Entry"
+
+msgid "I18N_OPENXPKI_UI_DATAPOOL_MODIFY_ENTRY"
+msgstr "Modify"
+
+msgid "I18N_OPENXPKI_UI_DATAPOOL_MOTD_LABEL"
+msgstr "Message of the Day"
+
+msgid "I18N_OPENXPKI_UI_DATAPOOL_MTIME"
+msgstr "Modification"
+
+msgid "I18N_OPENXPKI_UI_DATAPOOL_MTIME_AFTER"
+msgstr "Modified after"
+
+msgid "I18N_OPENXPKI_UI_DATAPOOL_MTIME_BEFORE"
+msgstr "Modified before"
+
+msgid "I18N_OPENXPKI_UI_DATAPOOL_NAMESPACE"
+msgstr "Namespace"
+
+msgid "I18N_OPENXPKI_UI_DATAPOOL_SEARCH_DESC"
+msgstr ""
+"Select namespace and, if necessary, search pattern for editing datapool "
+"entries."
+
+msgid "I18N_OPENXPKI_UI_DATAPOOL_SEARCH_KEY_PLACEHOLDER"
+msgstr "Search pattern for entry name, wildcards are allowed"
+
+msgid "I18N_OPENXPKI_UI_DATAPOOL_SEARCH_NAMESPACE_PLACEHOLDER"
+msgstr "Please choose namespace"
+
+msgid "I18N_OPENXPKI_UI_DATAPOOL_SEARCH_RESULT_DESC"
+msgstr ""
+"Datapool entries matching your search criteria. Please click on a line to "
+"edit."
+
+msgid "I18N_OPENXPKI_UI_DATAPOOL_SEARCH_RESULT_LABEL"
+msgstr "Result of the datapool search"
+
+msgid "I18N_OPENXPKI_UI_DATAPOOL_SEARCH_RESULT_TITLE"
+msgstr "Search result"
+
+msgid "I18N_OPENXPKI_UI_DATAPOOL_VALUE"
+msgstr "Value"
 
 msgid "I18N_OPENXPKI_UI_DELAYED_REVOCATION_REQUESTED"
 msgstr "Delayed revocation requested."
@@ -494,6 +625,9 @@ msgstr "Download text (TXT) format"
 msgid "I18N_OPENXPKI_UI_ELIGIBILITY_CHECK_UNEXPECTED_ERROR"
 msgstr "Eligibility check did not return properly (backend error)"
 
+msgid "I18N_OPENXPKI_UI_ENDPOINT_REQUIRES_TLS_CLIENT_AUTHENTICATION"
+msgstr "Endpoint requires mTLS for authentication"
+
 msgid "I18N_OPENXPKI_UI_ENROLLMENT_ERROR_CLEANUP"
 msgstr "Workflow was automatically cleaned up"
 
@@ -519,7 +653,7 @@ msgid "I18N_OPENXPKI_UI_ENROLLMENT_ERROR_POLICY_KEY_DUPLICATE"
 msgstr "Policy failed (key reuse detected)"
 
 msgid "I18N_OPENXPKI_UI_ENROLLMENT_ERROR_POLICY_NOT_FOUND"
-msgstr "Policy definition not found/loaded."
+msgstr "Policy definition not found/loaded"
 
 msgid "I18N_OPENXPKI_UI_ENROLLMENT_ERROR_POLICY_SUBJECT_DUPLICATE"
 msgstr "Policy failed (subject duplicate)"
@@ -528,25 +662,25 @@ msgid "I18N_OPENXPKI_UI_ENROLLMENT_ERROR_POLICY_VIOLATED"
 msgstr "Policy failed (too many valid certificates)"
 
 msgid "I18N_OPENXPKI_UI_ENROLLMENT_ERROR_REJECTED"
-msgstr "Request was rejected."
+msgstr "Request was rejected"
 
 msgid "I18N_OPENXPKI_UI_ENROLLMENT_ERROR_REQUEST_DUPLICATE"
 msgstr "Policy failed (request duplicate)"
 
 msgid "I18N_OPENXPKI_UI_ENROLLMENT_ERROR_REQUEST_NOT_AUTHORIZED"
-msgstr "Request was not properly authorized. "
+msgstr "Request was not properly authorized"
 
 msgid "I18N_OPENXPKI_UI_ENROLLMENT_ERROR_SIGNER_EXPIRED"
 msgstr "Signer certificate is expired."
 
 msgid "I18N_OPENXPKI_UI_ENROLLMENT_ERROR_SIGNER_NOT_AUTHORIZED"
-msgstr "Requester is not in authorized signer list. "
+msgstr "Requester is not in authorized signer list"
 
 msgid "I18N_OPENXPKI_UI_ENROLLMENT_ERROR_SIGNER_REVOKED"
-msgstr "Signer certificate is revoked."
+msgstr "Signer certificate is revoked"
 
 msgid "I18N_OPENXPKI_UI_ENROLLMENT_ERROR_SIGNER_UNKNOWN"
-msgstr "Signer certificate is unknown."
+msgstr "Signer certificate is unknown"
 
 msgid "I18N_OPENXPKI_UI_ENROLLMENT_ERROR_SUBJECT_INVALID"
 msgstr "Subject is invalid"
@@ -554,8 +688,11 @@ msgstr "Subject is invalid"
 msgid "I18N_OPENXPKI_UI_ENROLLMENT_RENEWAL_NOT_ALLOWED"
 msgstr "Renewal is not allowed"
 
+msgid "I18N_OPENXPKI_UI_ENTITY_NOT_FOUND"
+msgstr "The requested entity was not found"
+
 msgid "I18N_OPENXPKI_UI_ERROR_DURING_PUBLICATION"
-msgstr "Backend error during publishing "
+msgstr "Backend error during publishing"
 
 msgid "I18N_OPENXPKI_UI_ERROR_ON_REMOTE_BACKEND"
 msgstr "The remote backend responded with an error"
@@ -568,7 +705,7 @@ msgstr "The entered invalidity time is after the certificates expiration date!"
 
 msgid "I18N_OPENXPKI_UI_ERROR_VALIDATOR_INVALIDITYTIME_BEFORE_CERT_NOTBEFORE"
 msgstr ""
-"The entered invalidity time is earlier than  the certificates notbefore date!"
+"The entered invalidity time is earlier than the certificates notbefore date!"
 
 msgid "I18N_OPENXPKI_UI_ERROR_VALIDATOR_INVALIDITYTIME_CERTIFICATE_NOT_FOUND_IN_DB"
 msgstr "The certificate given as reference was not found."
@@ -578,9 +715,6 @@ msgstr "The given certificate identifier has an invalid format."
 
 msgid "I18N_OPENXPKI_UI_ERROR_VALIDATOR_INVALIDITYTIME_IN_FUTURE"
 msgstr "The entered invalidity time is in the future."
-
-msgid "I18N_OPENXPKI_UI_ERROR_VALIDATOR_VALIDITY_TIME_FAILED"
-msgstr "The entered date/time could not be validated."
 
 msgid "I18N_OPENXPKI_UI_ERROR_VALIDATOR_VALIDITY_TIME_INVALID_CONTENT"
 msgstr "The entered invalidity time has invalid content."
@@ -715,6 +849,9 @@ msgstr "Export unencrypted"
 msgid "I18N_OPENXPKI_UI_EXPORT_PRIVATE_KEY_FAILED"
 msgstr "Private key could not be decrypted/loaded."
 
+msgid "I18N_OPENXPKI_UI_EXTERNAL_PROCESS_TERMINATED"
+msgstr "The external process was terminated unexpectedly."
+
 msgid "I18N_OPENXPKI_UI_FIELD_DOMAINLIST"
 msgstr "Domain List"
 
@@ -727,7 +864,7 @@ msgstr "Logout Successful"
 
 msgid "I18N_OPENXPKI_UI_HOME_LOGOUT_PAGE"
 msgstr ""
-"You have been logged out. <a href=\\\"#/openxpki/login\\\">Go back to login "
+"You have been logged out. <a href=\"#/openxpki/login\">Go back to login "
 "page</a>."
 
 # Remove?
@@ -746,6 +883,9 @@ msgstr "Unable to find issuer certificate for CRL!"
 
 msgid "I18N_OPENXPKI_UI_INVALID_PROFILE"
 msgstr "Invalid Profile"
+
+msgid "I18N_OPENXPKI_UI_INVALID_TOKEN"
+msgstr "The provided token is not valid."
 
 msgid "I18N_OPENXPKI_UI_ISSUERS_LIST"
 msgstr " Issuing certificates of this realm"
@@ -820,9 +960,6 @@ msgstr "AES 256bit"
 msgid "I18N_OPENXPKI_UI_KEY_ENC_IDEA"
 msgstr "IDEA"
 
-msgid "I18N_OPENXPKI_UI_KEY_ENC_PASSWORD"
-msgstr "Encryption Password"
-
 msgid "I18N_OPENXPKI_UI_KEY_ENC_PASSWORD_CLIENT"
 msgstr "Choose password yourself"
 
@@ -850,6 +987,9 @@ msgstr "4096 bit"
 msgid "I18N_OPENXPKI_UI_KEY_XX_YY"
 msgstr "Username"
 
+msgid "I18N_OPENXPKI_UI_LAST_UPDATE_LABEL"
+msgstr "Last Update"
+
 msgid "I18N_OPENXPKI_UI_LOGIN_ABORT_BUTTON"
 msgstr "Abort"
 
@@ -866,8 +1006,8 @@ msgid "I18N_OPENXPKI_UI_LOGIN_NO_DATA_PAGE"
 msgstr ""
 "Your web browser failed to present the required information to log in using "
 "the chosen login method.<br>Please select a different type of "
-"authentication. <a href=\\\"#/openxpki/redirect!login\\\">Go back to login "
-"page</a>."
+"authentication. <a href=\"#/openxpki/redirect!login\">Go back to login page</"
+"a>."
 
 msgid "I18N_OPENXPKI_UI_LOGIN_PASSWORD"
 msgstr "Password"
@@ -884,6 +1024,12 @@ msgstr "Login service unavailable"
 msgid "I18N_OPENXPKI_UI_LOGIN_STACK_SELECTION_DESC"
 msgstr ""
 "Select the authentication method to use for login from the drop-down list."
+
+msgid "I18N_OPENXPKI_UI_LOGIN_STACK_SELECTION_LABEL"
+msgstr "Authentication method"
+
+msgid "I18N_OPENXPKI_UI_LOGIN_STACK_SELECTION_PLACEHOLDER"
+msgstr "Please choose:"
 
 msgid "I18N_OPENXPKI_UI_LOGIN_SUBMIT"
 msgstr "Login"
@@ -930,6 +1076,9 @@ msgstr "Issue a Certificate Revocation List (CRL)"
 msgid "I18N_OPENXPKI_UI_MENU_CSR_CHECK"
 msgstr "Request Checker"
 
+msgid "I18N_OPENXPKI_UI_MENU_DATAPOOL"
+msgstr "Datapool"
+
 msgid "I18N_OPENXPKI_UI_MENU_ENROLLMENT_SEARCH"
 msgstr "Enrollment Workflow Search"
 
@@ -969,6 +1118,15 @@ msgstr "My Workflows"
 msgid "I18N_OPENXPKI_UI_MENU_PKI_OPERATION"
 msgstr "PKI Operation"
 
+msgid "I18N_OPENXPKI_UI_MENU_PREREGISTER_CERTIFICATE"
+msgstr "Register Certificate"
+
+msgid "I18N_OPENXPKI_UI_MENU_PREREGISTER_DELETE"
+msgstr "Remove Preregistration"
+
+msgid "I18N_OPENXPKI_UI_MENU_PREREGISTRATION"
+msgstr "Certificate Preregistration"
+
 msgid "I18N_OPENXPKI_UI_MENU_PROCESS_INFORMATION"
 msgstr "Process Information"
 
@@ -999,9 +1157,6 @@ msgstr "Set Message of the Day"
 msgid "I18N_OPENXPKI_UI_MENU_SYSTEM_STATUS"
 msgstr "System Status"
 
-msgid "I18N_OPENXPKI_UI_MENU_USERS"
-msgstr "Manage Users"
-
 msgid "I18N_OPENXPKI_UI_MENU_WORKFLOW_SEARCH"
 msgstr "Workflow Search"
 
@@ -1010,6 +1165,24 @@ msgstr "This page shows a list of all workflows started by you."
 
 msgid "I18N_OPENXPKI_UI_MY_WORKFLOW_TITLE"
 msgstr "My Workflows"
+
+msgid "I18N_OPENXPKI_UI_NCIPHER_INPUT_FINISH_LABEL"
+msgstr "Finish: Unlock HSM"
+
+msgid "I18N_OPENXPKI_UI_NCIPHER_INPUT_RESET_LABEL"
+msgstr "Reset: Lock HSM"
+
+msgid "I18N_OPENXPKI_UI_NCIPHER_INPUT_SUBMIT_LABEL"
+msgstr "Send"
+
+msgid "I18N_OPENXPKI_UI_NCIPHER_INPUT_TEXT_LABEL"
+msgstr "Input"
+
+msgid "I18N_OPENXPKI_UI_NCIPHER_PAGE_DESC"
+msgstr "Please follow the instructions of the console output."
+
+msgid "I18N_OPENXPKI_UI_NCIPHER_PAGE_LABEL"
+msgstr "Unlock nCipher HSM"
 
 msgid "I18N_OPENXPKI_UI_NICE_BACKEND_ERROR"
 msgstr "Backend Communication Error"
@@ -1041,6 +1214,9 @@ msgstr "Update Domainlist"
 msgid "I18N_OPENXPKI_UI_NO"
 msgstr "No"
 
+msgid "I18N_OPENXPKI_UI_NODE_STATUS_LIST"
+msgstr "Cluster Status"
+
 msgid "I18N_OPENXPKI_UI_NOTIFY_EXPIRY_NOT_RENEWED"
 msgstr "expired"
 
@@ -1052,6 +1228,9 @@ msgstr "Workflow paused until next notification"
 
 msgid "I18N_OPENXPKI_UI_NO_SUCH_REALM_OR_SERVICE"
 msgstr "The requested URL has no service assigned."
+
+msgid "I18N_OPENXPKI_UI_OIDC_LOGIN_FAILED"
+msgstr "Unable to complete login with external provider."
 
 msgid "I18N_OPENXPKI_UI_OOPS"
 msgstr "Oops, something went wrong"
@@ -1167,9 +1346,6 @@ msgstr ""
 msgid "I18N_OPENXPKI_UI_PROFILE_BASIC_STYLE_LABEL"
 msgstr "Default profile style"
 
-msgid "I18N_OPENXPKI_UI_PROFILE_CHOOSE_PROFILE_FIRST"
-msgstr "Please select profile first"
-
 msgid "I18N_OPENXPKI_UI_PROFILE_CN_DESC"
 msgstr "Common Name"
 
@@ -1215,6 +1391,17 @@ msgstr "Hostname"
 msgid "I18N_OPENXPKI_UI_PROFILE_HOSTNAME_DESC"
 msgstr "Enter the fully qualified hostname (domain name) of your system."
 
+msgid "I18N_OPENXPKI_UI_PROFILE_IMPORTED_LABEL"
+msgstr "Imported Certificate"
+
+msgid "I18N_OPENXPKI_UI_PROFILE_IOT_DEVICE_STYLE_DESC"
+msgstr ""
+"This style uses serialNumber instead of commonName to be used for e.g. IoT "
+"devices"
+
+msgid "I18N_OPENXPKI_UI_PROFILE_IOT_DEVICE_STYLE_LABEL"
+msgstr "IoT Device"
+
 msgid "I18N_OPENXPKI_UI_PROFILE_LOCALITY_DESC"
 msgstr "Locality (L)"
 
@@ -1229,8 +1416,8 @@ msgstr "Owner (Email)"
 
 msgid "I18N_OPENXPKI_UI_PROFILE_OWNER_CONTACT_DESC"
 msgstr ""
-"Email adress of the certificate owner. This is used for e.g. sending the "
-"expiry notifications."
+"Email adress of the certificate owner (use shared/group mailbox!). This is "
+"used for e.g. sending the expiry notifications."
 
 msgid "I18N_OPENXPKI_UI_PROFILE_OWNER_GROUP"
 msgstr "Owner (Group)"
@@ -1317,6 +1504,9 @@ msgstr "URI"
 
 msgid "I18N_OPENXPKI_UI_PROFILE_SAN_URI_DESCRIPTION"
 msgstr "URI"
+
+msgid "I18N_OPENXPKI_UI_PROFILE_SERIALNUMBER"
+msgstr "Serial Number"
 
 msgid "I18N_OPENXPKI_UI_PROFILE_STATE_DESC"
 msgstr "State or Province (ST)"
@@ -1454,6 +1644,9 @@ msgstr "Requester"
 msgid "I18N_OPENXPKI_UI_SEARCH_RESULT_EXPIRED_OR_EMPTY"
 msgstr "Search result expired or empty!"
 
+msgid "I18N_OPENXPKI_UI_SEARCH_SUBMIT_LABEL"
+msgstr "Search now"
+
 msgid "I18N_OPENXPKI_UI_SEARCH_TRANSACTION_ID_LABEL"
 msgstr "Transaction Id"
 
@@ -1465,6 +1658,12 @@ msgstr "Ready"
 
 msgid "I18N_OPENXPKI_UI_SECRET_COMPLETE_INFO"
 msgstr "Secret is complete"
+
+msgid "I18N_OPENXPKI_UI_SECRET_GROUPS_STATUS_LABEL"
+msgstr "Secret groups"
+
+msgid "I18N_OPENXPKI_UI_SECRET_GROUPS_STATUS_UNAVAILABLE"
+msgstr "Number of unavailable secret groups:"
 
 msgid "I18N_OPENXPKI_UI_SECRET_INCOMPLETE"
 msgstr "Incomplete"
@@ -1507,25 +1706,82 @@ msgstr "Key Check Value does not match secret"
 msgid "I18N_OPENXPKI_UI_SECRET_UNLOCK_LABEL"
 msgstr "Unlock"
 
+msgid "I18N_OPENXPKI_UI_SELECT_ALL"
+msgstr "all"
+
 msgid "I18N_OPENXPKI_UI_STACK_HINT_LIST"
 msgstr "Login Methods"
+
+msgid "I18N_OPENXPKI_UI_STATUS_DATAVAULT_NOT_AVAILABLE"
+msgstr "not available"
+
+msgid "I18N_OPENXPKI_UI_STATUS_DATAVAULT_NO_TOKEN_FOUND"
+msgstr "no token found"
+
+msgid "I18N_OPENXPKI_UI_STATUS_DATAVAULT_TOKEN_EXPIRED"
+msgstr "Encryption token is expired"
+
+msgid "I18N_OPENXPKI_UI_STATUS_DATAVAULT_TOKEN_LABEL"
+msgstr "Active Encryption Token"
+
+msgid "I18N_OPENXPKI_UI_STATUS_DATAVAULT_TOKEN_NEARLY_EXPIRED"
+msgstr "Encryption token is near expiration"
+
+msgid "I18N_OPENXPKI_UI_STATUS_DATAVAULT_TOKEN_NOT_SET"
+msgstr "No encryption token set!"
+
+msgid "I18N_OPENXPKI_UI_STATUS_RUNNING_PROCESSES"
+msgstr "Running processes (global)"
+
+msgid "I18N_OPENXPKI_UI_STATUS_RUNNING_PROCESSES_INFO"
+msgstr "info"
+
+msgid "I18N_OPENXPKI_UI_STATUS_RUNNING_PROCESSES_SECONDS"
+msgstr "seconds"
+
+msgid "I18N_OPENXPKI_UI_STATUS_RUNNING_PROCESSES_STARTED"
+msgstr "started"
+
+msgid "I18N_OPENXPKI_UI_STATUS_SYSTEM_CRITICAL"
+msgstr "Your system status is critical!"
+
+msgid "I18N_OPENXPKI_UI_STATUS_SYSTEM_HEAD"
+msgstr "OpenXPKI system status"
+
+msgid "I18N_OPENXPKI_UI_STATUS_SYSTEM_OK"
+msgstr "System status is good"
+
+msgid "I18N_OPENXPKI_UI_STATUS_SYSTEM_WARNING"
+msgstr "Your system status requires your attention!"
 
 msgid "I18N_OPENXPKI_UI_SUPPORT_TRAILER"
 msgstr ""
 "Thank you for using OpenXPKI - for support and announcements please "
-"subscribe to our <a href=\\\"https://lists.sourceforge.net/lists/listinfo/"
-"openxpki-users\\\">mailinglist</a>.<br> If you need help with your setup or "
-"commercial support, please contact <a href=\\\"mailto:"
-"openxpki@whiterabbitsecurity.com\\\">openxpki@whiterabbitsecurity.com.</a>"
+"subscribe to our <a href=\"https://lists.sourceforge.net/lists/listinfo/"
+"openxpki-users\">mailinglist</a>.<br> If you need help with your setup or "
+"commercial support, please contact <a href=\"mailto:"
+"openxpki@whiterabbitsecurity.com\">openxpki@whiterabbitsecurity.com.</a>"
 
 msgid "I18N_OPENXPKI_UI_SYSTEM_VERSION_STATUS_LABEL"
 msgstr "System Version"
+
+msgid "I18N_OPENXPKI_UI_TASKLIST_PENDING_ACME_ACCOUNT_REQUEST_DESCRIPTION"
+msgstr "ACME Account requests awaiting approval."
+
+msgid "I18N_OPENXPKI_UI_TASKLIST_PENDING_ACME_ACCOUNT_REQUEST_LABEL"
+msgstr "ACME Account Registration"
 
 msgid "I18N_OPENXPKI_UI_TASKLIST_PENDING_ENROLLMENT_DESCRIPTION"
 msgstr "SCEP Enrollment workflows awaiting approval."
 
 msgid "I18N_OPENXPKI_UI_TASKLIST_PENDING_ENROLLMENT_LABEL"
 msgstr "Enrollments"
+
+msgid "I18N_OPENXPKI_UI_TASKLIST_PENDING_PREREG_DESCRIPTION"
+msgstr "Preregistration workflows awaiting approval."
+
+msgid "I18N_OPENXPKI_UI_TASKLIST_PENDING_PREREG_LABEL"
+msgstr "Requests for Preregistration Token"
 
 msgid "I18N_OPENXPKI_UI_TASKLIST_PENDING_REQUEST_DESCRIPTION"
 msgstr "Certificate requests awaiting approval."
@@ -1544,6 +1800,9 @@ msgstr "No data available"
 
 msgid "I18N_OPENXPKI_UI_TOKEN_ALIAS"
 msgstr "Token Alias"
+
+msgid "I18N_OPENXPKI_UI_TOKEN_OF_TYPE"
+msgstr "Tokens of type:"
 
 msgid "I18N_OPENXPKI_UI_TOKEN_STATUS"
 msgstr "Token Status"
@@ -1574,6 +1833,9 @@ msgstr "Unable to parse PKCS10 request"
 
 msgid "I18N_OPENXPKI_UI_UNKNOWN_ERROR"
 msgstr "Unknown error"
+
+msgid "I18N_OPENXPKI_UI_UPTIME_LABEL"
+msgstr "Uptime"
 
 msgid "I18N_OPENXPKI_UI_USER_ADD_USER"
 msgstr "Add User"
@@ -1728,6 +1990,10 @@ msgstr "Authority Key IDs do not match"
 msgid "I18N_OPENXPKI_UI_VALIDATOR_X509_CHAIN_VALIDATION_FAILED"
 msgstr "Chain could not be validated"
 
+msgid "I18N_OPENXPKI_UI_VALIDATOR_X509_INVALID_INPUT"
+msgstr ""
+"The input must not contain anything else than PEM formated certificates"
+
 msgid "I18N_OPENXPKI_UI_VALIDATOR_X509_PARSE_ERROR"
 msgstr "Certificate can not be read"
 
@@ -1790,6 +2056,14 @@ msgstr "Approve Revocation"
 msgid "I18N_OPENXPKI_UI_WORKFLOW_ACTION_APPROVE_CSR_DESC"
 msgstr "I18N_OPENXPKI_UI_WORKFLOW_TYPE_NOTIFY_EXPIRY_LABEL"
 
+msgid "I18N_OPENXPKI_UI_WORKFLOW_ACTION_APPROVE_DESC"
+msgstr ""
+"Please validate the given information and approve the request only if you "
+"are sure that this information is correct."
+
+msgid "I18N_OPENXPKI_UI_WORKFLOW_ACTION_APPROVE_LABEL"
+msgstr "Approve Request"
+
 msgid "I18N_OPENXPKI_UI_WORKFLOW_ACTION_CERTIFICATE_PUBLISHING_INITIALIZE_DESC"
 msgstr "Initialize"
 
@@ -1803,6 +2077,12 @@ msgstr ""
 
 msgid "I18N_OPENXPKI_UI_WORKFLOW_ACTION_CERTREG_RETYPE_SERVER_PASSWORD_LABEL"
 msgstr "Your Enrollment Key"
+
+msgid "I18N_OPENXPKI_UI_WORKFLOW_ACTION_CERT_AUTH_INIT_DESC"
+msgstr "Select the endpoint for which you want to request the authorization."
+
+msgid "I18N_OPENXPKI_UI_WORKFLOW_ACTION_CERT_AUTH_INIT_LABEL"
+msgstr "Registrar Authorization"
 
 msgid "I18N_OPENXPKI_UI_WORKFLOW_ACTION_CHANGEMETA_LOAD_DATA_DESC"
 msgstr ""
@@ -2071,6 +2351,15 @@ msgstr "Upload externally generated CRL into this realm."
 msgid "I18N_OPENXPKI_UI_WORKFLOW_ACTION_IMPORTCRL_UPLOAD_LABEL"
 msgstr "Upload CRL"
 
+msgid "I18N_OPENXPKI_UI_WORKFLOW_ACTION_INIT_CERTIFICATE_UPLOAD_DESC"
+msgstr ""
+"Please put the PEM encoded certificate into the box below. Please note that "
+"you can only upload certificates where the issuer certificate is already "
+"known by the PKI."
+
+msgid "I18N_OPENXPKI_UI_WORKFLOW_ACTION_INIT_CERTIFICATE_UPLOAD_LABEL"
+msgstr "Certificate Upload"
+
 msgid "I18N_OPENXPKI_UI_WORKFLOW_ACTION_INIT_ISSUE_CRL_DESC"
 msgstr ""
 "This process triggers the creation of new revocation lists for all active "
@@ -2095,13 +2384,12 @@ msgstr "Issue CRL"
 
 msgid "I18N_OPENXPKI_UI_WORKFLOW_ACTION_MOTD_INITIALIZE_DESCRIPTION"
 msgstr ""
-"You can set a \\\"Message of the Day\\\" that is shown as a status bar on "
-"the top of main page each time a user logs in. You can create a MOTD per "
-"user role or for all users. If a general and a role specific message is "
-"defined, only the one for the role is shown. If you specify a link url, a "
-"new browser window opens with the given url when the user clicks on the "
-"message box. To delete an existing MOTD, just define a new one with the not "
-"valid after date set to now."
+"You can set a \"Message of the Day\" that is shown as a status bar on the "
+"top of main page each time a user logs in. You can create a MOTD per user "
+"role or for all users. If a general and a role specific message is defined, "
+"only the one for the role is shown. If you specify a link url, a new browser "
+"window opens with the given url when the user clicks on the message box. To "
+"delete an existing MOTD, submit this form with the message field left empty"
 
 msgid "I18N_OPENXPKI_UI_WORKFLOW_ACTION_MOTD_INITIALIZE_LABEL"
 msgstr "Set Information"
@@ -2116,10 +2404,10 @@ msgid "I18N_OPENXPKI_UI_WORKFLOW_ACTION_NICE_CHECK_FOR_REVOCATION_LABEL"
 msgstr "Revocation Pending"
 
 msgid "I18N_OPENXPKI_UI_WORKFLOW_ACTION_NICE_FETCH_CERTIFICATE_DESC"
-msgstr "Revoke the certificate"
+msgstr "Retry to fetch the certificate from the external issuer."
 
 msgid "I18N_OPENXPKI_UI_WORKFLOW_ACTION_NICE_FETCH_CERTIFICATE_LABEL"
-msgstr "Revoke the certificate"
+msgstr "Fetch the certificate"
 
 msgid "I18N_OPENXPKI_UI_WORKFLOW_ACTION_NICE_ISSUE_CERTIFICATE_DESC"
 msgstr "Issue certificate"
@@ -2134,6 +2422,18 @@ msgstr ""
 
 msgid "I18N_OPENXPKI_UI_WORKFLOW_ACTION_POLICY_VIOLATION_COMMENT_LABEL"
 msgstr "Provide Justification"
+
+msgid "I18N_OPENXPKI_UI_WORKFLOW_ACTION_PREREG_DELETE_INITIAL_DESC"
+msgstr ""
+"Please enter the entity name / fqdn that you want to deregister. Please note "
+"that you need to provide the API-Token for this entity name to complete this "
+"process."
+
+msgid "I18N_OPENXPKI_UI_WORKFLOW_ACTION_PREREG_DELETE_INITIAL_LABEL"
+msgstr "Delete Preregistration"
+
+msgid "I18N_OPENXPKI_UI_WORKFLOW_ACTION_PREREG_ENTER_SECRET_LABEL"
+msgstr "Enter API-Token/Secret"
 
 msgid "I18N_OPENXPKI_UI_WORKFLOW_ACTION_REJECT_CRR_DESC"
 msgstr "Reject this revocation request."
@@ -2223,14 +2523,32 @@ msgstr "Please update / complete the information below."
 msgid "I18N_OPENXPKI_UI_WORKFLOW_ACTION_UPDATE_CRR_LABEL"
 msgstr "Update Request"
 
+msgid "I18N_OPENXPKI_UI_WORKFLOW_ACTION_UPDATE_ENDPOINT_AUTH_DESC"
+msgstr ""
+"Authorize the selected certificate as registrar for the given endpoints. "
+"Revoke authorization by removing the items from the list."
+
+msgid "I18N_OPENXPKI_UI_WORKFLOW_ACTION_UPDATE_ENDPOINT_AUTH_LABEL"
+msgstr "Authorized Registrar"
+
+msgid "I18N_OPENXPKI_UI_WORKFLOW_ACTION_UPLOAD_CERTIFICATE_DESC"
+msgstr ""
+"Please paste (or use the upload handle) the PEM encoded certificate you have "
+"received from the external ca to be uploaded. Upload is only possible if the "
+"certificate issuer is known and the certificate key matches the one "
+"requested from this workflow!"
+
+msgid "I18N_OPENXPKI_UI_WORKFLOW_ACTION_UPLOAD_CERTIFICATE_LABEL"
+msgstr "Upload Certificate"
+
+msgid "I18N_OPENXPKI_UI_WORKFLOW_APPROVE_BUTTON"
+msgstr "Approve Request"
+
 msgid "I18N_OPENXPKI_UI_WORKFLOW_ARCHIVE_AT_LABEL"
 msgstr "Archive at"
 
 msgid "I18N_OPENXPKI_UI_WORKFLOW_ATTRIBUTE_LABEL"
 msgstr "Workflow Attributes"
-
-msgid "I18N_OPENXPKI_UI_WORKFLOW_BACK_TO_INFO_LABEL"
-msgstr "Back to Info"
 
 msgid "I18N_OPENXPKI_UI_WORKFLOW_BULK_DESCRIPTION"
 msgstr ""
@@ -2283,8 +2601,14 @@ msgstr "Submit with Policy Exception"
 msgid "I18N_OPENXPKI_UI_WORKFLOW_BUTTON_POLICY_VIOLATION_RECHECK_LABEL"
 msgstr "Re-Evaluate Policy"
 
+msgid "I18N_OPENXPKI_UI_WORKFLOW_BUTTON_REMOVE_TOKEN_LABEL"
+msgstr "Remove Token"
+
 msgid "I18N_OPENXPKI_UI_WORKFLOW_BUTTON_SET_VALIDITY_LABEL"
 msgstr "Change Validity"
+
+msgid "I18N_OPENXPKI_UI_WORKFLOW_BUTTON_UPDATE_ENDPOINT_AUTH_LABEL"
+msgstr "Modify Authorized Registrar"
 
 msgid "I18N_OPENXPKI_UI_WORKFLOW_CANCEL_BUTTON"
 msgstr "Cancel Request"
@@ -2345,9 +2669,6 @@ msgstr "Exception Message"
 
 msgid "I18N_OPENXPKI_UI_WORKFLOW_EXPORT_PRIVATEKEY_RETRY_PASSWORD_BUTTON_LABEL"
 msgstr "Re-Enter Password"
-
-msgid "I18N_OPENXPKI_UI_WORKFLOW_EXTRA_INFO_LABEL"
-msgstr "Technical Information"
 
 msgid "I18N_OPENXPKI_UI_WORKFLOW_FIELD_ADDUSER_EMAIL_DESC"
 msgstr "Email of user"
@@ -2426,6 +2747,14 @@ msgstr " Copy or upload the PEM encoded certificate"
 
 msgid "I18N_OPENXPKI_UI_WORKFLOW_FIELD_CERTSIGN_TOKEN"
 msgstr "Issuing CA"
+
+msgid "I18N_OPENXPKI_UI_WORKFLOW_FIELD_CERT_EXTENSION_PARTS_DESC"
+msgstr ""
+"Components forming the certificates extension section (like certTemplateName "
+"or MS Security OID)."
+
+msgid "I18N_OPENXPKI_UI_WORKFLOW_FIELD_CERT_EXTENSION_PARTS_LABEL"
+msgstr "Certificate Extensions Parts"
 
 msgid "I18N_OPENXPKI_UI_WORKFLOW_FIELD_CERT_IDENTIFIER_DESC"
 msgstr ""
@@ -2511,7 +2840,7 @@ msgid "I18N_OPENXPKI_UI_WORKFLOW_FIELD_CERT_SUBJECT_PARTS_DESC"
 msgstr " "
 
 msgid "I18N_OPENXPKI_UI_WORKFLOW_FIELD_CERT_SUBJECT_PARTS_LABEL"
-msgstr "SubjectAltName Components"
+msgstr "Subject Components"
 
 msgid "I18N_OPENXPKI_UI_WORKFLOW_FIELD_CERT_SUBJECT_PARTS_PLACEHOLDER"
 msgstr " "
@@ -2744,6 +3073,26 @@ msgstr "usually not required, use the selector on the right or type a datetime"
 msgid "I18N_OPENXPKI_UI_WORKFLOW_FIELD_INVALIDITY_TIME_TOOLTIP"
 msgstr "set this only if you know the implication!"
 
+msgid "I18N_OPENXPKI_UI_WORKFLOW_FIELD_ISSUER_IDENTIFIER_DESC"
+msgstr ""
+"If known, you can enter the alphanumeric identifier of the certificate or "
+"just type the subject of the certificate to start a search. The results will "
+"be displayed below the field, select the expected one using the left mouse "
+"button. Note that the search function requires a minimum of three letters."
+
+msgid "I18N_OPENXPKI_UI_WORKFLOW_FIELD_ISSUER_IDENTIFIER_LABEL"
+msgstr "Issuer"
+
+msgid "I18N_OPENXPKI_UI_WORKFLOW_FIELD_ISSUER_IDENTIFIER_PLACEHOLDER"
+msgstr "Enter certificate identifier or type your subject to start autosearch!"
+
+msgid "I18N_OPENXPKI_UI_WORKFLOW_FIELD_ISSUER_IDENTIFIER_TOOLTIP"
+msgstr ""
+"The autosearch will search for certificates that contain the given words in "
+"the subject and will show them in a drop down list below. Select the needed "
+"certificate from the list by clicking on it. Note that the search function "
+"requires a minimum of three letters."
+
 msgid "I18N_OPENXPKI_UI_WORKFLOW_FIELD_IS_REPLACE_LABEL"
 msgstr "Is Replacement"
 
@@ -2758,6 +3107,18 @@ msgstr " "
 
 msgid "I18N_OPENXPKI_UI_WORKFLOW_FIELD_KEY_GEN_PARAMS_LABEL"
 msgstr "Key Params"
+
+msgid "I18N_OPENXPKI_UI_WORKFLOW_FIELD_KEY_PARAMS_DESC"
+msgstr "  "
+
+msgid "I18N_OPENXPKI_UI_WORKFLOW_FIELD_KEY_PARAMS_LABEL"
+msgstr "Key Parameters"
+
+msgid "I18N_OPENXPKI_UI_WORKFLOW_FIELD_METADATA_HASH"
+msgstr "Metadata (key/value)"
+
+msgid "I18N_OPENXPKI_UI_WORKFLOW_FIELD_META_AUTH_ENDPOINT_LABEL"
+msgstr "Endpoint Auth."
 
 msgid "I18N_OPENXPKI_UI_WORKFLOW_FIELD_META_EMAIL_DESC"
 msgstr "Email address of the responsible person for this certificate."
@@ -2789,6 +3150,12 @@ msgstr "Owner (Group)"
 
 msgid "I18N_OPENXPKI_UI_WORKFLOW_FIELD_META_REQUESTOR_LABEL"
 msgstr "Requester/Owner"
+
+msgid "I18N_OPENXPKI_UI_WORKFLOW_FIELD_META_SUPPORT_CONTACT_DESC"
+msgstr "Email address to use as support contact for certificate notifcations."
+
+msgid "I18N_OPENXPKI_UI_WORKFLOW_FIELD_META_SUPPORT_CONTACT_LABEL"
+msgstr "Support Contact (Email)"
 
 msgid "I18N_OPENXPKI_UI_WORKFLOW_FIELD_META_SYSTEM_ID_DESC"
 msgstr "System Identifier"
@@ -3411,6 +3778,9 @@ msgstr ""
 msgid "I18N_OPENXPKI_UI_WORKFLOW_MOTD_LINK_MESSAGE_LABEL"
 msgstr "Link"
 
+msgid "I18N_OPENXPKI_UI_WORKFLOW_MOTD_MESSAGE_REMOVED_LABEL"
+msgstr "The message for the given role was removed from the system."
+
 msgid "I18N_OPENXPKI_UI_WORKFLOW_MOTD_VALIDATOR_EXPIRATION_DATE_FAILED"
 msgstr "The Not Valid After date must be in the future!"
 
@@ -3432,6 +3802,11 @@ msgstr "Paused action"
 msgid "I18N_OPENXPKI_UI_WORKFLOW_PAUSE_REASON_LABEL"
 msgstr "Pause Reason"
 
+msgid "I18N_OPENXPKI_UI_WORKFLOW_PREREG_DELETE_SUCCESS_DESC"
+msgstr ""
+"The prepregistration was removed. The formerly registered entity is now "
+"available for new registrations, the API key was deleted."
+
 msgid "I18N_OPENXPKI_UI_WORKFLOW_PROC_STATE_HINT"
 msgstr "The internal processing state of the workflow."
 
@@ -3440,6 +3815,9 @@ msgstr "Run State"
 
 msgid "I18N_OPENXPKI_UI_WORKFLOW_PROPERTY_ACCESS_NOT_ALLOWED_FOR_ROLE"
 msgstr "Access to this workflow property is forbidden for your current role"
+
+msgid "I18N_OPENXPKI_UI_WORKFLOW_REJECT_BUTTON"
+msgstr "Reject Request"
 
 msgid "I18N_OPENXPKI_UI_WORKFLOW_RELOAD_RELATED_LIST"
 msgstr "Re-evaluate Related"
@@ -3506,6 +3884,9 @@ msgstr "All Issued Certificates"
 msgid "I18N_OPENXPKI_UI_WORKFLOW_REQUESTED_ACTION_NOT_AVAILABLE"
 msgstr "Requested action not available - opening current state"
 
+msgid "I18N_OPENXPKI_UI_WORKFLOW_REQUEST_BUTTON"
+msgstr "Submit Request"
+
 msgid "I18N_OPENXPKI_UI_WORKFLOW_RESET_BUTTON"
 msgstr "Go Back"
 
@@ -3568,9 +3949,6 @@ msgstr "State"
 
 msgid "I18N_OPENXPKI_UI_WORKFLOW_SEARCH_STATE_PLACEHOLDER"
 msgstr "exact match of an internal state name, e.g. SUCCESS or PENDING"
-
-msgid "I18N_OPENXPKI_UI_WORKFLOW_SEARCH_SUBMIT_LABEL"
-msgstr "Search now"
 
 msgid "I18N_OPENXPKI_UI_WORKFLOW_SEARCH_TYPE_HINT"
 msgstr "Filter on the selected workflow type."
@@ -3743,16 +4121,14 @@ msgstr "Private Key Password"
 msgid "I18N_OPENXPKI_UI_WORKFLOW_STATE_CSR_ENTER_SAN_LABEL"
 msgstr "Certificate Subject Alt. Name"
 
-#, fuzzy
 msgid "I18N_OPENXPKI_UI_WORKFLOW_STATE_CSR_ENTER_SUBJECT_DESC"
-msgstr "This workflow has finished with success and can not be restarted"
+msgstr "Provide information to build the subject of the certificate from."
 
 msgid "I18N_OPENXPKI_UI_WORKFLOW_STATE_CSR_ENTER_SUBJECT_LABEL"
 msgstr "Certificate Subject"
 
-#, fuzzy
 msgid "I18N_OPENXPKI_UI_WORKFLOW_STATE_CSR_INITIAL_DESC"
-msgstr "This workflow failed finally and can not be restarted"
+msgstr " "
 
 msgid "I18N_OPENXPKI_UI_WORKFLOW_STATE_CSR_INITIAL_LABEL"
 msgstr " "
@@ -3908,6 +4284,15 @@ msgstr ""
 msgid "I18N_OPENXPKI_UI_WORKFLOW_STATE_KEY_DUPLICATE_ERROR_WORKFLOW_LABEL"
 msgstr "Duplicate Key Error (Request)"
 
+msgid "I18N_OPENXPKI_UI_WORKFLOW_STATE_KEY_INVALID_PARAMS_DESC"
+msgstr ""
+"The uploaded key is not compliant with the key policy for this profile. "
+"Please check your policy documentation on the accepted algorithms and "
+"parameters."
+
+msgid "I18N_OPENXPKI_UI_WORKFLOW_STATE_KEY_INVALID_PARAMS_LABEL"
+msgstr "Invalid Key Parameters"
+
 msgid "I18N_OPENXPKI_UI_WORKFLOW_STATE_LABEL"
 msgstr "State"
 
@@ -3936,6 +4321,21 @@ msgstr ""
 "can find additional information on the pause reason and scheduled wakeup "
 "time below."
 
+msgid "I18N_OPENXPKI_UI_WORKFLOW_STATE_PENDING_DESC"
+msgstr "This request is awaiting approval by an registration officer."
+
+msgid "I18N_OPENXPKI_UI_WORKFLOW_STATE_PENDING_LABEL"
+msgstr "Approval Pending"
+
+msgid "I18N_OPENXPKI_UI_WORKFLOW_STATE_PENDING_USER_DESC"
+msgstr ""
+"Please review your request and use the \"submit\" button if you are "
+"confident that the information is correct. If you want to abort the request, "
+"use the \"cancel\" button to terminate this request."
+
+msgid "I18N_OPENXPKI_UI_WORKFLOW_STATE_PENDING_USER_LABEL"
+msgstr "Request Review "
+
 msgid "I18N_OPENXPKI_UI_WORKFLOW_STATE_POLICY_VIOLATION_DESC"
 msgstr ""
 "This request fails one or more policy checks but the owner requested "
@@ -3943,6 +4343,26 @@ msgstr ""
 
 msgid "I18N_OPENXPKI_UI_WORKFLOW_STATE_POLICY_VIOLATION_LABEL"
 msgstr "Policy Violation Pending"
+
+msgid "I18N_OPENXPKI_UI_WORKFLOW_STATE_PREREG_DUPLICATE_TOKEN_DESC"
+msgstr ""
+"A preregistration token for the given subject already exists. In case there "
+"is no active registration profile assigned, you can use the \"remove token\" "
+"button below to delete the existing entry. In case there is an active "
+"registration, you need to use the provided removal workflow to delete the "
+"registration before you can continue."
+
+msgid "I18N_OPENXPKI_UI_WORKFLOW_STATE_PREREG_DUPLICATE_TOKEN_LABEL"
+msgstr "Subject already assigned"
+
+msgid "I18N_OPENXPKI_UI_WORKFLOW_STATE_PROVIDE_SECRET_DESC"
+msgstr ""
+"Please provide the API-Token/Secret that was assigned for this entity to "
+"proceed with the request. If you do not have the secret available, please "
+"reach out to the support team."
+
+msgid "I18N_OPENXPKI_UI_WORKFLOW_STATE_PROVIDE_SECRET_LABEL"
+msgstr "Secret Required"
 
 msgid "I18N_OPENXPKI_UI_WORKFLOW_STATE_RATOKEN_CERT_EXISTS_DESC"
 msgstr ""
@@ -4108,6 +4528,24 @@ msgstr "This workflow has finished with success and can not be restarted"
 msgid "I18N_OPENXPKI_UI_WORKFLOW_SUBMIT_BUTTON"
 msgstr "Continue"
 
+msgid "I18N_OPENXPKI_UI_WORKFLOW_TYPE_ACME_ACCOUNT_UPDATE_DESC"
+msgstr "Update to a registered ACME user account"
+
+msgid "I18N_OPENXPKI_UI_WORKFLOW_TYPE_ACME_ACCOUNT_UPDATE_LABEL"
+msgstr "ACME Account Update"
+
+msgid "I18N_OPENXPKI_UI_WORKFLOW_TYPE_ACME_DOMAIN_VALIDATAION_DESC"
+msgstr " "
+
+msgid "I18N_OPENXPKI_UI_WORKFLOW_TYPE_ACME_DOMAIN_VALIDATAION_LABEL"
+msgstr "ACME Domain Validation"
+
+msgid "I18N_OPENXPKI_UI_WORKFLOW_TYPE_ACME_NEWACCOUNT_DESC"
+msgstr "Request registration of a new ACME user account"
+
+msgid "I18N_OPENXPKI_UI_WORKFLOW_TYPE_ACME_NEWACCOUNT_LABEL"
+msgstr "ACME Account Registration"
+
 msgid "I18N_OPENXPKI_UI_WORKFLOW_TYPE_ADDUSER_DESC"
 msgstr "Add a new user"
 
@@ -4121,6 +4559,12 @@ msgstr ""
 
 msgid "I18N_OPENXPKI_UI_WORKFLOW_TYPE_CA_PUBLISH_LABEL"
 msgstr "Publish CA Information"
+
+msgid "I18N_OPENXPKI_UI_WORKFLOW_TYPE_CERTIFICATE_PREREG_DELETE_DESC"
+msgstr "Delete a formerly assigned preregistration token."
+
+msgid "I18N_OPENXPKI_UI_WORKFLOW_TYPE_CERTIFICATE_PREREG_DELETE_LABEL"
+msgstr "Certificate Preregistration Removal"
 
 msgid "I18N_OPENXPKI_UI_WORKFLOW_TYPE_CERTIFICATE_PREREG_REQUEST_DESC"
 msgstr ""
@@ -4143,6 +4587,19 @@ msgstr "Certificate Signing Request (CSR)"
 msgid "I18N_OPENXPKI_UI_WORKFLOW_TYPE_CERTIFICATE_SIGNING_REQUEST_LABEL"
 msgstr "Certificate Signing Request (CSR)"
 
+msgid "I18N_OPENXPKI_UI_WORKFLOW_TYPE_CERTIFICATE_UPLOAD_DESC"
+msgstr "Allows the upload of an externally managed certificate."
+
+msgid "I18N_OPENXPKI_UI_WORKFLOW_TYPE_CERTIFICATE_UPLOAD_LABEL"
+msgstr "Certificate Upload"
+
+msgid "I18N_OPENXPKI_UI_WORKFLOW_TYPE_CERT_AUTH_DESC"
+msgstr ""
+"Assign authorization to use a certificate as OnBehalf signer for an endpoint"
+
+msgid "I18N_OPENXPKI_UI_WORKFLOW_TYPE_CERT_AUTH_LABEL"
+msgstr "Registrar Authorization"
+
 msgid "I18N_OPENXPKI_UI_WORKFLOW_TYPE_CERT_ENROLL_DESC"
 msgstr ""
 "Certificate Enrollment workflow used for certificate enrollment via "
@@ -4159,6 +4616,12 @@ msgstr ""
 msgid "I18N_OPENXPKI_UI_WORKFLOW_TYPE_CERT_ENROLL_PREREG_LABEL"
 msgstr "Certificate Enrollment (Prereg)"
 
+msgid "I18N_OPENXPKI_UI_WORKFLOW_TYPE_CERT_EXPORT_DESC"
+msgstr "Export a certificate via RPC API"
+
+msgid "I18N_OPENXPKI_UI_WORKFLOW_TYPE_CERT_EXPORT_LABEL"
+msgstr "Certificate Export"
+
 msgid "I18N_OPENXPKI_UI_WORKFLOW_TYPE_CERT_PUBLISH_DESC"
 msgstr "Publish certificate information to defined repositories."
 
@@ -4172,6 +4635,12 @@ msgstr ""
 
 msgid "I18N_OPENXPKI_UI_WORKFLOW_TYPE_CHANGE_METADATA_LABEL"
 msgstr "Change Metadata"
+
+msgid "I18N_OPENXPKI_UI_WORKFLOW_TYPE_CRL_EXPORT_DESC"
+msgstr "Export certificate revocation lists via API."
+
+msgid "I18N_OPENXPKI_UI_WORKFLOW_TYPE_CRL_EXPORT_LABEL"
+msgstr "CRL Export"
 
 msgid "I18N_OPENXPKI_UI_WORKFLOW_TYPE_CRL_IMPORT_DESC"
 msgstr "Import certificate revocation lists from external CAs"
@@ -4327,29 +4796,62 @@ msgstr "CRL data not properly formated"
 msgid "I18N_OPENXPKI_UI_WORKFLOW_WAKEUP_AT_LABEL"
 msgstr "Wake Up"
 
-# Remove?
 msgid "I18N_OPENXPKI_UI_YES"
 msgstr "Yes"
 
-#~ msgid "I18N_OPENXPKI_UI_DICE_UPDATE_DOMAINLIST"
-#~ msgstr "Update Domainlist"
+#~ msgid "I18N_OPENXPKI_UI_BULK_PENDING_ENROLLMENT_DESCRIPTION"
+#~ msgstr "Bulk approve or reject outstanding enrollment requests."
+
+#~ msgid "I18N_OPENXPKI_UI_BULK_PENDING_ENROLLMENT_LABEL"
+#~ msgstr "Enrollments"
+
+#~ msgid "I18N_OPENXPKI_UI_CERT_SUBJECT_PARTS"
+#~ msgstr "Subject Parts"
+
+# Remove?
+#, fuzzy
+#~ msgid "I18N_OPENXPKI_UI_CUST"
+#~ msgstr "Yes"
+
+#~ msgid "I18N_OPENXPKI_UI_ERROR_VALIDATOR_VALIDITY_TIME_FAILED"
+#~ msgstr "The entered date/time could not be validated."
+
+#~ msgid "I18N_OPENXPKI_UI_KEY_ENC_PASSWORD"
+#~ msgstr "Encryption Password"
+
+#~ msgid "I18N_OPENXPKI_UI_MENU_USERS"
+#~ msgstr "Manage Users"
+
+#~ msgid "I18N_OPENXPKI_UI_PROFILE_CHOOSE_PROFILE_FIRST"
+#~ msgstr "Please select profile first"
+
+#~ msgid "I18N_OPENXPKI_UI_WORKFLOW_BUTTON_ENDPOINT_AUTH_LABEL"
+#~ msgstr "Authorized Endpoint(s)"
+
+#~ msgid "I18N_OPENXPKI_UI_WORKFLOW_EXTRA_INFO_LABEL"
+#~ msgstr "Technical Information"
+
+#~ msgid "I18N_OPENXPKI_UI_WORKFLOW_STATE_CERT_AUTH_PENDING_DESC"
+#~ msgstr "This request requires approval."
 
 #, fuzzy
-#~ msgid "I18N_OPENXPKI_UI_WORKFLOW_BUTTON_OVERRIDE_POLICY_LABEL"
-#~ msgstr "Override Policy"
+#~ msgid "I18N_OPENXPKI_UI_WORKFLOW_STATE_CERT_AUTH_PENDING_LABEL"
+#~ msgstr "Approval Pending"
 
 #, fuzzy
-#~ msgid "I18N_OPENXPKI_UI_WORKFLOW_CSR_SUCCESS_DESC"
-#~ msgstr "This workflow has finished with success and can not be restarted"
+#~ msgid "I18N_OPENXPKI_UI_WORKFLOW_STATE_CERT_AUTH_REVIEW_DESC"
+#~ msgstr "This workflow failed finally."
 
 #, fuzzy
-#~ msgid "I18N_OPENXPKI_UI_WORKFLOW_STATE_CRR_INITIAL_DESC"
-#~ msgstr "This workflow failed finally and can not be restarted"
+#~ msgid "I18N_OPENXPKI_UI_WORKFLOW_STATE_CERT_AUTH_REVIEW_LABEL"
+#~ msgstr "FAILURE"
 
 #, fuzzy
-#~ msgid "I18N_OPENXPKI_UI_WORKFLOW_STATE_SHOWMETA_SUCCESS_DESC"
-#~ msgstr "The new password was persisted in the database"
+#~ msgid "I18N_OPENXPKI_UI_WORKFLOW_TYPE_CERT_PREREG_REPORT_DESC"
+#~ msgstr ""
+#~ "With certificate preregistration you can request the assignment of  "
+#~ "hostnames to a commonName for later enrollment via an automated interface "
+#~ "using a API key."
 
-#, fuzzy
-#~ msgid "I18N_OPENXPKI_UI_WORKFLOW_STATE_SHOWMETA_SUCCESS_LABEL"
-#~ msgstr "New Password Set"
+#~ msgid "I18N_OPENXPKI_UI_WORKFLOW_TYPE_CERT_PREREG_REPORT_LABEL"
+#~ msgstr "Preregistration Request Report"

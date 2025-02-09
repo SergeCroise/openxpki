@@ -6,11 +6,11 @@ use Data::Dumper;
 use Date::Parse;
 
 extends 'OpenXPKI::Client::UI::Workflow';
+with 'OpenXPKI::Client::UI::Role::QueryCache';
 
 =head1 OpenXPKI::Client::UI::Bulk
 
 Inherits from workflow, offers methods for workflow bulk processing.
-This is experimental, most parameters are hardcoded.
 
 =cut
 
@@ -25,7 +25,7 @@ sub init_index {
     );
 
     # Spec holds additional search attributes and list definition
-    my @bulklist = @{$self->_session->param('bulk')->{default}};
+    my @bulklist = @{$self->session_param('bulk')->{default}};
 
     BULKITEM:
     foreach my $bulk (@bulklist) {
@@ -34,7 +34,7 @@ sub init_index {
             action => 'bulk!result',
             label => $bulk->{label},
             description => $bulk->{description},
-            submit_label => 'I18N_OPENXPKI_UI_WORKFLOW_SEARCH_SUBMIT_LABEL',
+            submit_label => 'I18N_OPENXPKI_UI_SEARCH_SUBMIT_LABEL',
         )->add_field(
             name => 'wf_creator',
             label => 'I18N_OPENXPKI_UI_WORKFLOW_SEARCH_CREATOR_LABEL',
@@ -59,7 +59,7 @@ sub init_index {
         }
 
         my $id = $self->__generate_uid();
-        $self->_client->session()->param('bulk_'.$id, $bulk );
+        $self->session_param('bulk_'.$id, $bulk );
         $form->add_field(
             name => 'formid',
             type => 'hidden',
@@ -78,7 +78,7 @@ sub action_result {
     my $queryid = $self->param('formid');
 
     # Read query pattern and list info from persisted data
-    my $spec = $self->_client->session()->param('bulk_'.$queryid);
+    my $spec = $self->session_param('bulk_'.$queryid);
     if (!$spec) {
         return $self->redirect->to('bulk!index');
     }
@@ -128,7 +128,7 @@ sub action_result {
         $query->{return_attributes} = $rattrib;
     }
 
-    $self->logger()->trace("query : " . Dumper $query) if $self->logger->is_trace;
+    $self->log->trace("query : " . Dumper $query) if $self->log->is_trace;
 
     my $result_count = $self->send_command_v2( 'search_workflow_instances_count',  $query );
 
@@ -147,36 +147,41 @@ sub action_result {
 
         # convert action link into a token to prevent injection of data
         my $action;
-        if (substr($btn{action},0,23) eq 'workflow!bulk!wf_action') {
-            $action = substr($btn{action},24);
+        if (my ($a) = $btn{action} =~ /^workflow!bulk!wf_action!(.*)/) {
+            $action = $a;
         } else {
             $action = $btn{action};
         }
-        my $token = $self->__register_wf_token( undef, {
+
+        my $selection_field = $self->__generate_uid(); # name of input field that will hold IDs of selected rows
+        $btn{selection} = $selection_field;
+
+        my $token = $self->__wf_token_extra_param( undef, {
             wf_action => $action,
             ($btn{params} ? (params => $btn{params}) :()),
             ($btn{async} ? (async => 1) :()),
+            selection_field => $selection_field,
         });
+
+        $btn{action} = "workflow!bulk!${token}";
+
         delete $btn{params};
-        # also use the id of the token as name for the input field
-        $btn{action} = 'workflow!bulk!wf_token!'.$token->{value};
-        $btn{selection} = $token->{value};
         push @buttons, \%btn;
     }
 
     push @buttons, {
         label => 'I18N_OPENXPKI_UI_SEARCH_REFRESH',
-        page => 'redirect!bulk!result!id!' .$queryid,
+        page => 'redirect!workflow!result!id!' .$queryid,
         break_before => 1,
     };
 
     push @buttons, {
         label => 'I18N_OPENXPKI_UI_SEARCH_NEW_SEARCH',
-        page => 'bulk!index!' . $self->__generate_uid(),
+        page => 'bulk!index',
     };
 
     $self->__save_query($queryid => {
-        'type' => 'bulk',
+        pagename => 'workflow',
         'count' => $result_count,
         'query' => $query,
         'input' => {},
@@ -190,7 +195,7 @@ sub action_result {
         'button' => \@buttons,
     });
 
-    $self->redirect->to('bulk!result!id!'.$queryid);
+    $self->redirect->to("workflow!result!id!${queryid}");
 
     return $self;
 

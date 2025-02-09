@@ -33,12 +33,8 @@ read_config $configfile => my %config;
 OpenXPKI::Log4perl->init_or_fallback( $config{global}{log_config} );
 my $log = Log::Log4perl->get_logger();
 
-if (!$config{global}{socket}) {
-    $config{global}{socket} = '/var/openxpki/openxpki.socket';
-}
-if (!$config{global}{scripturl}) {
-    $config{global}{scripturl} = '/cgi-bin/webui.fcgi';
-}
+# set defaults
+$config{global}{socket} ||= '/var/openxpki/openxpki.socket';
 
 $log->info('Start fcgi loop ' . $$. ', config: ' . $configfile);
 
@@ -133,10 +129,20 @@ while (my $cgi = CGI::Fast->new()) {
     if (my $eval_err = $EVAL_ERROR) {
         $log->error('Got error from backend ' . $eval_err );
 
-        print $cgi->header(-status => 404),
-            $cgi->start_html('Requested entity not found'),
-            $cgi->h1('Requested entity not found'),
-            $cgi->end_html;
+        print $cgi->header( -status => 404, -type => 'text/html' );
+        print <<"EOF";
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Requested entity not found</title>
+    </head>
+    <body>
+        <h1>Requested entity not found</h1>
+    </body>
+</html>
+EOF
     }
 
     $client->disconnect() if ($client);
@@ -148,5 +154,3 @@ $log->info('end fcgi loop ' . $$);
 1;
 
 __END__;
-
-

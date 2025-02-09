@@ -1,27 +1,22 @@
-## OpenXPKI::Server.pm
-##
-## Written 2005 by Michael Bell for the OpenXPKI project
-## (C) Copyright 2005-2006 by The OpenXPKI Project
 package OpenXPKI::Server;
+use OpenXPKI -base => 'Net::Server::MultiType';
 
-use strict;
-use warnings;
-use utf8;
-
-use base qw( Net::Server::MultiType );
-use Net::Server::Daemonize qw( set_uid set_gid );
-
-## used modules
-
-use English;
+# Core modules
 use Socket;
-use Scalar::Util qw( blessed );
-use OpenXPKI::Debug;
-use OpenXPKI::Exception;
+use Module::Load ();
+
+# CPAN modules
+use Net::Server::Daemonize qw( set_uid set_gid );
+use Log::Log4perl qw(:levels);
+
+# Project modules
 use OpenXPKI::Server::Context qw( CTX );
 use OpenXPKI::Server::Init;
 use OpenXPKI::Server::Watchdog;
 use OpenXPKI::Server::Notification::Handler;
+use OpenXPKI::Util;
+use OpenXPKI::Control;
+
 
 our $stop_soon = 0;
 our $main_pid;
@@ -47,68 +42,20 @@ sub new {
     return $self;
 }
 
-sub __init_server {
-    my $self = shift;
-
-    eval {
-        # we need to get a usable logger as soon as possible, hence:
-        # initialize configuration, i18n and log
-        OpenXPKI::Server::Init::init({
-            TASKS  => [ 'config_versioned', 'i18n', 'log' ],
-            SILENT => $self->{SILENT},
-        });
-
-        # from now on we can assume that we have CTX('log') available
-        # perform the rest of the initialization
-        my %p = ( SILENT => $self->{SILENT} );
-        if (!$self->{BACKGROUND}) {
-            $p{SKIP} = [ 'redirect_stderr' ];
-        }
-        OpenXPKI::Server::Init::init( \%p );
-    };
-    $self->__log_and_die($EVAL_ERROR, 'server initialization') if $EVAL_ERROR;
-}
-
-sub __init_net_server {
-    my $self = shift;
-
-    ##! 1: "start"
-
-    eval {
-        $self->{PARAMS} = $self->__get_server_config();
-
-        # Net::Server does not provide a hook that lets us change the
-        # ownership of the created socket properly: it chowns the socket
-        # file itself just before set_uid/set_gid. hence we make Net::Server
-        # believe that it does not have to set_uid/set_gid itself and do this
-        # a little later in the pre_loop_hook
-        # to make this work, delete the corresponding settings from the
-        # Net::Server init params
-        if (exists $self->{PARAMS}->{user}) {
-            $self->{PARAMS}->{process_owner} = $self->{PARAMS}->{user};
-            delete $self->{PARAMS}->{user};
-        }
-        if (exists $self->{PARAMS}->{group}) {
-            $self->{PARAMS}->{process_group} = $self->{PARAMS}->{group};
-            delete $self->{PARAMS}->{group};
-        }
-
-        unlink ($self->{PARAMS}->{socketfile});
-        CTX('log')->system()->info("Server initialization completed");
-
-        $self->{PARAMS}->{no_client_stdout} = 1;
-    };
-    $self->__log_and_die($EVAL_ERROR, 'server daemon setup') if $EVAL_ERROR;
-
-    ##! 1: "finished"
-
-}
-
 sub start {
     my $self = shift;
 
     umask $self->{umask};
+
     $self->__init_server;
+
+    CTX('log')->system->info(sprintf("Server: %s", OpenXPKI::Control::get_version(config => CTX('config'))));
+    CTX('log')->system->info(sprintf("Perl: %s", $^V->normal));
+    if (CTX('log')->system->is_debug) {
+        CTX('log')->system->debug("Environment:");
+        CTX('log')->system->debug(sprintf(" - %s = %s", $_, $ENV{$_})) for sort keys %ENV;
+    }
+
     $self->__init_user_interfaces;
     $self->__init_net_server;
 
@@ -118,7 +65,24 @@ sub start {
 
     CTX('log')->audit('system')->info('server was started');
 
+    # Disconnect database before Net::Server forks esp. to fix warnings when
+    # using DBD::MariaDB (DBI occasionally warns: "DBI active kids (-1) < 0").
+    # DBIx::Handler sets (Auto)InactiveDestroy which should prevent such
+    # problems but DBD::MariaDB does not seem to properly handle it.
+    # Also see https://github.com/perl5-dbi/DBD-MariaDB/pull/175.
+    # This workaround should not cause problems because DBIx::Handler does a
+    # reconnect if neccessary.
+    # FIXME Remove workaround when https://github.com/perl5-dbi/DBD-MariaDB/pull/175 is resolved
+    eval { CTX('dbi')->disconnect if OpenXPKI::Server::Context::hascontext('dbi') };
+    eval { CTX('dbi_log')->disconnect if OpenXPKI::Server::Context::hascontext('dbi_log') };
+
     $self->run(%{$self->{PARAMS}}); # from Net::Server::MultiType
+}
+
+sub cleanup {
+    eval { CTX('config')->cleanup };
+    eval { CTX('dbi')->disconnect };
+    eval { CTX('dbi_log')->disconnect };
 }
 
 sub pre_server_close_hook {
@@ -127,33 +91,51 @@ sub pre_server_close_hook {
 
     # remove pid and socketfile on destruction - they are no longer useful
     # if the server is not running ...
-    ##! 8: 'unlink socketfile ' . $self->{PARAMS}->{socketfile}
-    unlink ($self->{PARAMS}->{socketfile});
-    ##! 4: 'socketfile removed'
-    ##! 8: 'unlink pid file ' . $self->{PARAMS}->{pid_file}
-    unlink ($self->{PARAMS}->{pid_file});
-    ##! 4: 'pid_file removed'
+    if ($self->{PARAMS}->{socketfile}) {
+        ##! 8: 'unlink socketfile ' . $self->{PARAMS}->{socketfile}
+        unlink $self->{PARAMS}->{socketfile};
+        ##! 4: 'socketfile removed'
+    }
+    if ($self->{PARAMS}->{pid_file}) {
+        ##! 8: 'unlink pid file ' . $self->{PARAMS}->{pid_file}
+        unlink $self->{PARAMS}->{pid_file};
+        ##! 4: 'pid_file removed'
+    }
 
-    return 1;
+    # if this is the main process
+    if ($main_pid and $main_pid == $$) {
+        # stop metrics server
+        if (CTX('metrics')->enabled) {
+            try {
+                require OpenXPKI::Metrics::Prometheus; # this is EE code
+                OpenXPKI::Metrics::Prometheus->terminate;
+            }
+            catch ($err) { warn $err }
+        }
+
+        # stop watchdog
+        try {
+            ##! 1: 'pre_server_close_hook() in main server - terminate watchdog'
+            OpenXPKI::Server::Watchdog->terminate;
+        }
+        catch ($err) { warn $err }
+    }
+
+    try {
+        $self->cleanup;
+    }
+    catch ($err) { warn $err }
 }
 
-sub DESTROY {
-    ##! 1: 'start'
+# Net::Server method
+sub write_to_log_hook {
     my $self = shift;
+    my $syslog_level = shift; # Net::Server/log_level: 0=>'err', 1=>'warning', 2=>'notice', 3=>'info', 4=>'debug'.
+    my $msg = shift;
 
-    if ($self->{TYPE} eq 'Simple') {
-        # for servers in the foreground, call the pre_server_close_hook
-        # on destruction ...
-        $self->pre_server_close_hook();
-    }
+    my %syslog_to_l4p = ( 0 => $ERROR, 1 => $WARN, 2 => $INFO, 3 => $DEBUG, 4 => $TRACE );
 
-    # if this is the main process try to kill the watchdog
-    if ($main_pid && $main_pid == $$) {
-        ##! 1: 'DESTROY in main server - terminate watchdog'
-        OpenXPKI::Server::Watchdog->terminate;
-    }
-
-    return 1;
+    CTX('log')->system->log($syslog_to_l4p{$syslog_level}, $msg);
 }
 
 # from Net::Server:
@@ -238,41 +220,67 @@ sub pre_loop_hook {
         # Set verbose process name
         OpenXPKI::Server::__set_process_name("server");
 
-        if ( $self->{PARAMS}->{process_group} ne $) ){
-            $self->log(2, "Setting gid to \"$self->{PARAMS}->{process_group}\"");
-            CTX('log')->system->debug("Setting gid to \"$self->{PARAMS}->{process_group}\"");
+        my $gid = $self->{PARAMS}->{process_group};
+        if ( $gid ne $EGID ){
+            $self->log(2, "Setting GID to '$gid'");
+            CTX('log')->system->debug("Setting GID to '$gid'");
 
-            set_gid( $self->{PARAMS}->{process_group} );
+            set_gid( $gid );
         }
-        if ( $self->{PARAMS}->{process_owner} ne $> ){
-            $self->log(2, "Setting uid to \"$self->{PARAMS}->{process_owner}\"");
-            CTX('log')->system->debug("Setting uid to \"$self->{PARAMS}->{process_owner}\"");
+        my $uid = $self->{PARAMS}->{process_owner};
+        if ( $uid ne $EUID ){
+            $self->log(2, "Setting UID to '$uid'");
+            CTX('log')->system->debug("Setting UID to '$uid'");
 
-            set_uid( $self->{PARAMS}->{process_owner} );
+            set_uid( $uid );
         }
     };
     if ($EVAL_ERROR){
-        if ($> == 0) {
+        if ($EUID == 0) {
             CTX('log')->system->fatal($EVAL_ERROR);
             die $EVAL_ERROR;
-        } elsif($< == 0) {
+        } elsif($UID == 0) {
             CTX('log')->system->warn("Effective UID changed, but Real UID is 0: $EVAL_ERROR");
         } else {
             CTX('log')->system->error($EVAL_ERROR);
         }
     }
 
-    # For Net::Server::Fork (and PreFork) we don't overwrite the SIGCHLD handler
+    # For Net::Server::Fork and ::PreFork we don't overwrite the SIGCHLD handler
     # to not interfere with their child tracking.
-    # The child processes of Fork and PreFork will set SIGCHLD set to 'DEFAULT'
+    # The *child* processes of Fork and PreFork will set SIGCHLD set to 'DEFAULT'
     # so that calls to system() etc. work.
-    # For Net::Server::Single we do use our special SIGCHLD handler to make
-    # subsequent calls to system() work (which happen in the same process).
+    # For Net::Server::Single we do use our special SIGCHLD handler by setting
+    # keep_parent_sigchld => 0 to make subsequent calls to system() work (as
+    # they happen in the same process in this case).
     my $is_forking = $self->{TYPE} eq 'Fork' || $self->{TYPE} eq 'PreFork';
 
     # Start watchdog late in Net::Server startup phase so that Net::Server's
     # SIGCHLD handler has been set.
     OpenXPKI::Server::Watchdog->start_or_reload(keep_parent_sigchld => $is_forking);
+
+    # Start metrics server
+    if (CTX('config')->get(['system','metrics','enabled'])) {
+        try {
+            my $agent = CTX('config')->get_hash(['system','metrics','agent']) // {};
+            require OpenXPKI::Metrics::Prometheus; # this is EE code
+            OpenXPKI::Metrics::Prometheus->start(
+                user  => $agent->{user}  // CTX('config')->get('system.server.user'),
+                group => $agent->{group} // CTX('config')->get('system.server.group'),
+                host  => $agent->{host}  // 'localhost',
+                port  => $agent->{port}  // 7070,
+                keep_parent_sigchld => $is_forking,
+            );
+        }
+        catch ($err) {
+            if ($err =~ m{locate OpenXPKI/Metrics/Prometheus\.pm in \@INC}) {
+                CTX('log')->system->warn('Cannot start Prometheus agent: EE class OpenXPKI::Metrics::Prometheus not found');
+            }
+            else {
+                die $err;
+            }
+        }
+    }
 }
 
 # calles with PreFork when child is forked
@@ -339,15 +347,13 @@ sub process_request {
     # each other.
     srand(time ^ $PROCESS_ID);
 
-    eval
-    {
-        $rc = do_process_request(@_);
-    };
+    eval { $rc = do_process_request(@_) };
+
     if (my $exc = OpenXPKI::Exception->caught()) {
         if ($exc->message() =~ m{ (?:
-                I18N_OPENXPKI_TRANSPORT.*CLOSED_CONNECTION
-                | I18N_OPENXPKI_SERVICE_COLLECT_TIMEOUT
-            ) }xms) {
+            I18N_OPENXPKI_TRANSPORT.*CLOSED_CONNECTION
+            | I18N_OPENXPKI_SERVICE_COLLECT_TIMEOUT
+        ) }xms) {
             # exit quietly
             return 1;
         }
@@ -415,7 +421,11 @@ sub do_process_request {
     my $msg = $transport->read();
 
     if ($msg =~ m{ \A (?:Simple|JSON|Fast) \z }xms) {
-        eval "\$serializer = OpenXPKI::Serialization::$msg->new();";
+        eval {
+            my $class = "OpenXPKI::Serialization::$msg";
+            Module::Load::load($class);
+            $serializer = $class->new;
+        };
 
         if (! defined $serializer) {
             $transport->write("OpenXPKI::Server: Serializer failed to initialize.\n");
@@ -445,27 +455,38 @@ sub do_process_request {
              TRANSPORT     => $transport,
              SERIALIZATION => $serializer,
         });
-        $transport->write($serializer->serialize ("OK"));
     }
     elsif ($data eq 'SCEP') {
         $service = OpenXPKI::Service::SCEP->new({
             TRANSPORT     => $transport,
             SERIALIZATION => $serializer,
         });
-        $transport->write($serializer->serialize('OK'));
     }
     elsif ($data eq 'LibSCEP') {
         $service = OpenXPKI::Service::LibSCEP->new({
             TRANSPORT     => $transport,
             SERIALIZATION => $serializer,
         });
-        $transport->write($serializer->serialize('OK'));
+    }
+    elsif ($data eq 'CLI') {
+        my $idle_timeout = CTX('config')->get('system.server.service.CLI.idle_timeout');
+        my $max_execution_time = CTX('config')->get('system.server.service.CLI.max_execution_time');
+
+        # Refactoring ongoing - Moose class - expects array not hash
+        $service = OpenXPKI::Service::CLI->new(
+            transport => $transport,
+            serialization => $serializer,
+            $idle_timeout ? (idle_timeout => $idle_timeout) : (),
+            $max_execution_time ? (max_execution_time => $max_execution_time) : (),
+        );
     }
     else {
         $transport->write($serializer->serialize("OpenXPKI::Server: Unsupported service.\n"));
         $log->fatal("Unsupported service.");
         return;
     }
+
+    $transport->write($serializer->serialize ("OK"));
 
     ##! 2: "update pre-initialized variables"
 
@@ -494,6 +515,63 @@ sub do_process_request {
 ###########################################################################
 # private methods
 
+sub __init_server {
+    my $self = shift;
+
+    eval {
+        # we need to get a usable logger as soon as possible, hence:
+        # initialize configuration, i18n and log
+        OpenXPKI::Server::Init::init({
+            TASKS  => [ 'config_versioned', 'i18n', 'log' ],
+            SILENT => $self->{SILENT},
+        });
+
+        # from now on we can assume that we have CTX('log') available
+        # perform the rest of the initialization
+        my %p = ( SILENT => $self->{SILENT} );
+        if (!$self->{BACKGROUND}) {
+            $p{SKIP} = [ 'redirect_stderr' ];
+        }
+        OpenXPKI::Server::Init::init( \%p );
+    };
+    $self->__log_and_die($EVAL_ERROR, 'server initialization') if $EVAL_ERROR;
+}
+
+sub __init_net_server {
+    my $self = shift;
+
+    ##! 1: "start"
+
+    eval {
+        $self->{PARAMS} = $self->__get_server_config();
+
+        # Net::Server does not provide a hook that lets us change the
+        # ownership of the created socket properly: it chowns the socket
+        # file itself just before set_uid/set_gid. hence we make Net::Server
+        # believe that it does not have to set_uid/set_gid itself and do this
+        # a little later in the pre_loop_hook
+        # to make this work, delete the corresponding settings from the
+        # Net::Server init params
+        if (exists $self->{PARAMS}->{user}) {
+            $self->{PARAMS}->{process_owner} = $self->{PARAMS}->{user};
+            delete $self->{PARAMS}->{user};
+        }
+        if (exists $self->{PARAMS}->{group}) {
+            $self->{PARAMS}->{process_group} = $self->{PARAMS}->{group};
+            delete $self->{PARAMS}->{group};
+        }
+
+        unlink ($self->{PARAMS}->{socketfile});
+        CTX('log')->system()->info("Server initialization completed");
+
+        $self->{PARAMS}->{no_client_stdout} = 1;
+    };
+    $self->__log_and_die($EVAL_ERROR, 'server daemon setup') if $EVAL_ERROR;
+
+    ##! 1: "finished"
+
+}
+
 sub __init_user_interfaces {
     my $self = shift;
 
@@ -509,7 +587,7 @@ sub __init_user_interfaces {
             next unless ($transport->{$class});
 
             $class = "OpenXPKI::Transport::".$class;
-            eval "use $class;";
+            eval { Module::Load::load($class) };
             if ($EVAL_ERROR) {
                 OpenXPKI::Exception->throw (
                     message => "I18N_OPENXPKI_SERVER_GET_USER_INTERFACE_TRANSPORT_FAILED",
@@ -534,7 +612,7 @@ sub __init_user_interfaces {
 
             ##! 4: "init $class"
             $class = "OpenXPKI::Service::".$class;
-            eval "use $class;";
+            eval { Module::Load::load($class) };
             if ($EVAL_ERROR) {
                 ##! 8: "use $class failed"
                 OpenXPKI::Exception->throw (
@@ -557,45 +635,6 @@ sub __init_user_interfaces {
     ##! 1: "finished"
     return 1;
 }
-
-# returns numerical user id for specified user (name or id)
-# undef if not found
-sub __get_numerical_user_id {
-    my $arg = shift;
-
-    return unless defined $arg;
-
-    my ($pw_name,$pw_passwd,$pw_uid,$pw_gid,
-        $pw_quota,$pw_comment,$pw_gcos,$pw_dir,$pw_shell,$pw_expire) =
-        getpwnam ($arg);
-
-    if (! defined $pw_uid && ($arg =~ m{ \A \d+ \z }xms)) {
-    ($pw_name,$pw_passwd,$pw_uid,$pw_gid,
-     $pw_quota,$pw_comment,$pw_gcos,$pw_dir,$pw_shell,$pw_expire) =
-         getpwuid ($arg);
-    }
-
-    return $pw_uid;
-}
-
-# returns numerical group id for specified group (name or id)
-# undef if not found
-sub __get_numerical_group_id {
-    my $arg = shift;
-
-    return unless defined $arg;
-
-    my ($gr_name,$gr_passwd,$gr_gid,$gr_members) =
-        getgrnam ($arg);
-
-    if (! defined $gr_gid && ($arg =~ m{ \A \d+ \z }xms)) {
-    ($gr_name,$gr_passwd,$gr_gid,$gr_members) =
-        getgrgid ($arg);
-    }
-
-    return $gr_gid;
-}
-
 
 sub __get_server_config {
     my $self = shift;
@@ -672,74 +711,28 @@ sub __get_server_config {
         }
     }
 
-    my $user = __get_numerical_user_id($params{user});
-    if (not defined $user or $user eq '') {
-        OpenXPKI::Exception->throw (
-            message => "I18N_OPENXPKI_SERVER_CONFIG_INCORRECT_USER",
-            params  => { "USER" => $params{"user"} },
-            log => {
-                message => "Incorrect system user '$params{user}'",
-                facility => 'system',
-                priority => 'fatal',
-            },
+    try {
+        # resolve process owner, die on empty user/group
+        (undef, $params{user}, undef, $params{group})
+          = OpenXPKI::Util->resolve_user_group($params{user}, $params{group}, 'server process');
+
+        # check if we have different ownership settings for the socket
+        my $socket_owner = $config->get('system.server.socket_owner');
+        my $socket_group = $config->get('system.server.socket_group');
+
+        # resolve socket owner, allow and pass through empty user/group
+        my (undef, $socket_uid, undef, $socket_gid)
+          = OpenXPKI::Util->resolve_user_group($socket_owner, $socket_group, 'socket', 1);
+
+        $params{socket_owner} = $socket_uid if defined $socket_uid;
+        $params{socket_group} = $socket_gid if defined $socket_gid;
+    }
+    catch ($err) {
+        OpenXPKI::Exception->throw(
+            message => "Error in 'system.server' configuration: $err",
+            log => { priority => 'fatal' },
         );
     }
-    # convert user id to numerical
-    $params{user} = __get_numerical_user_id($user);
-
-    my $group = __get_numerical_group_id($params{group});
-    if (not defined $group or $group eq '') {
-        OpenXPKI::Exception->throw (
-            message => "I18N_OPENXPKI_SERVER_CONFIG_INCORRECT_DAEMON_GROUP",
-            params  => { "GROUP" => $params{"group"} },
-            log => {
-                message => "Incorrect system group '$params{group}'",
-                facility => 'system',
-                priority => 'fatal',
-            },
-        );
-    }
-    # convert group id to numerical
-    $params{group} = __get_numerical_group_id($group);
-
-    # check if we have different ownership settings for the socket
-    my $socket_owner = $config->get('system.server.socket_owner');
-    if (defined $socket_owner) {
-        # convert user id to numerical
-        $params{socket_owner} = __get_numerical_user_id($socket_owner);
-
-        if (not defined $params{socket_owner} or $params{socket_owner} eq '') {
-            OpenXPKI::Exception->throw (
-                message => "I18N_OPENXPKI_SERVER_CONFIG_INCORRECT_SOCKET_OWNER",
-                params  => {
-                    "SOCKET_OWNER" => $socket_owner,
-                },
-                log => {
-                    message => "Incorrect socket owner '$socket_owner'",
-                    facility => 'system',
-                    priority => 'fatal',
-                },
-            );
-        }
-    }
-
-    my $socket_group = $config->get('system.server.socket_group');
-    if (defined $socket_group) {
-        # convert group id to numerical
-        $params{socket_group} = __get_numerical_group_id($socket_group);
-
-        if (not defined $params{socket_group} or $params{socket_group} eq '') {
-            OpenXPKI::Exception->throw (
-                message => "I18N_OPENXPKI_SERVER_CONFIG_INCORRECT_SOCKET_OWNER_GROUP",
-                params  => { "SOCKET_GROUP" => $socket_group },
-                log => {
-                    message => "Incorrect socket group '$socket_group'",
-                    facility => 'system',
-                    priority => 'fatal',
-                },
-            );
-        }
-    };
 
     ##! 1: "finished"
 

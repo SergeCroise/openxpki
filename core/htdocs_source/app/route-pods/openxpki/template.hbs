@@ -1,0 +1,220 @@
+{{!
+  *************************************
+  Menu
+  *************************************
+}}
+<BsNavbar
+    @backgroundColor="secondary"
+    @toggleBreakpoint="lg"
+    class="py-2 py-lg-0 mb-3 bg-opacity-10 border-2 border-bottom border-secondary"
+    as |navbar|
+>
+    <navbar.toggle toggle={{true}} />
+    <navbar.content id="oxi-navbar">
+        <navbar.nav class="me-auto" as |nav|>
+            {{#each this.model.navEntries as |navEntry|}}
+                {{!-- sub menu --}}
+                {{#if navEntry.entries.length}}
+                    <nav.dropdown class="mx-lg-2" as |dd|>
+                        <dd.toggle class="{{if navEntry.active "active"}}">
+                            {{navEntry.label}}
+                            <span class="caret"></span>
+                        </dd.toggle>
+                        <dd.menu as |ddm|>
+                            {{#each navEntry.entries as |entry|}}
+                                <ddm.item>
+                                    {{#if entry.key}}
+                                        {{! We need the href in addition to the click handler to support
+                                            opening the page in a new window }}
+                                        <a
+                                            class="dropdown-item {{if entry.active "active"}}"
+                                            href="{{url-for "openxpki" entry.key}}"
+                                            {{on "click" (fn this.navigateTo entry.key navbar.collapse)}}
+                                        >
+                                            {{entry.label}}
+                                        </a>
+                                    {{else}}
+                                        {{#if entry.label}}
+                                            <span class="dropdown-header">{{entry.label}}</span>
+                                        {{else}}
+                                            <div class="dropdown-divider"></div>
+                                        {{/if}}
+                                    {{/if}}
+                                </ddm.item>
+                            {{/each}}
+                        </dd.menu>
+                    </nav.dropdown>
+                {{!-- plain menu item --}}
+                {{else}}
+                    <nav.item class="mx-lg-2">
+                        <a
+                            class="nav-link {{if navEntry.active "active"}}"
+                            href="{{url-for "openxpki" navEntry.key}}"
+                            {{on "click" (fn this.navigateTo navEntry.key navbar.collapse)}}
+                        >
+                            {{navEntry.label}}
+                        </a>
+                    </nav.item>
+                {{/if}}
+            {{/each}}
+        </navbar.nav>
+        <navbar.nav as |nav|>
+            {{#if this.model.user}}
+                <nav.item>
+                    <nav.linkTo {{on "click" this.logout}}>
+                        {{t 'site.logout'}}
+                    </nav.linkTo>
+                </nav.item>
+            {{/if}}
+        </navbar.nav>
+    </navbar.content>
+</BsNavbar>
+
+<div class="container-fluid pe-md-3 {{this.model.top.page.className}}">
+    {{!
+      *************************************
+      Old browser warning
+      *************************************
+    }}
+    <div class="row">
+        <div class="col oxi-message">
+            <div class="alert alert-danger" hidden={{not (and (not this.content.user) this.oldBrowser)}}>
+                {{t 'site.old_browser' browser=this.oldBrowser}}
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col oxi-pagehead">
+            {{!
+              *************************************
+              Breadcrumbs
+            }}
+            {{#each this.breadcrumbs as |bc|}}
+                {{#let (concat "badge text-bg-secondary rounded-pill oxi-breadcrumb mb-3 " bc.class) as |css|}}
+                {{#if bc.page}}
+                    <a
+                        class="btn {{css}}"
+                        role="button"
+                        {{on "click" (fn this.content.gotoBreadcrumb bc)}}
+                    >
+                        {{bc.label}}
+                    </a>
+                {{else}}
+                    <span class="{{css}} bg-secondary">
+                        {{bc.label}}
+                    </span>
+                {{/if}}
+                {{#unless (eq bc this.breadcrumbs.lastObject)}}
+                    <i class="glyphicon glyphicon-chevron-right text-secondary mx-2"></i>
+                {{/unless}}
+                {{/let}}
+            {{/each}}
+
+            {{!
+              *************************************
+              Status messages
+            }}
+            <div class="row">
+                <OxiBase::Status @def={{this.model.status}}/>
+            </div>
+
+        </div>
+    </div>
+
+    {{!
+      *************************************
+      Page title and page wide buttons
+    }}
+    <div class="row row-cols-1 row-cols-md-2 justify-content-between">
+        <div class="col col-md-auto oxi-pagehead">
+            <h3>
+                {{#if this.model.top.page.label}}
+                    {{this.model.top.page.label}}
+                {{/if}}
+                {{#if this.model.isAutoRefresh}}
+                    <span class="alert alert-info py-1 ms-2 fs-6" role="alert">
+                        <span class="glyphicon glyphicon-refresh spin-slow"></span>
+                        &nbsp;{{t 'site.banner.autorefresh'}}
+                    </span>
+                {{/if}}
+            </h3>
+        </div>
+        <div class="col col-md-auto oxi-pagehead" {{on-init this.setTempCopyElement}}>
+            {{#if this.workflowCopyIdButton}}
+                <OxiBase::Button @button={{this.workflowCopyIdButton}} class="btn-sm btn-light oxi-btn-copy-workflow-id" />
+            {{/if}}
+            {{#each this.model.top.page.buttons as |btn|}}
+                <OxiBase::Button @button={{btn}} class="btn-sm" />
+            {{/each}}
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col oxi-main">
+            {{!
+              *************************************
+              Page description
+            }}
+            {{#if this.model.top.page.description}}
+                <div class="row">
+                    <div class="col mb-3">
+                        {{defuse this.model.top.page.description}}
+                    </div>
+                </div>
+            {{/if}}
+
+            {{!
+              *************************************
+              Main page content
+            }}
+            {{#each this.model.top.main as |entry index|}}
+                <!-- this.model.top.main item -->
+                {{! extra row/col level to restrict form width as overly long input fields look ugly }}
+                <div class="row">
+                    <div class="col {{if (eq entry.type "form") "col-xl-10"}}">
+                        <OxiSection
+                            @content={{entry}}
+                            @meta={{hash sectionNo=index renderAsCard=(and (not entry.compact) (eq entry.type "keyvalue") (not entry.content.buttons))}}
+                        />
+                    </div>
+                </div>
+            {{/each}}
+        </div>
+    </div>
+</div>
+
+{{!-- Contents of sub-routes (i.e. /openxpki/popup) if any.
+      "Each template will be rendered into the {{outlet}} of its parent route's template." --}}
+{{outlet}}
+
+<BsModal
+    @open={{if this.model.error true false}}
+    @closeButton={{true}}
+    @fade={{true}}
+    @backdrop={{true}}
+    @backdropClose={{false}}
+    @size="lg"
+    as |Modal|
+>
+    <Modal.header>
+        <h4 class="modal-title">{{t 'error_popup.header'}}</h4>
+    </Modal.header>
+    <Modal.body>
+        <OxiBase::Formatted::Arbitrary @value={{this.model.error}} @raw={{true}} />
+    </Modal.body>
+    <Modal.footer>
+        <BsButton {{on "click" this.reload}} @type="primary">{{t 'error_popup.reload'}}</BsButton>
+        <BsButton {{on "click" Modal.close}}>{{t 'site.close_popup'}}</BsButton>
+    </Modal.footer>
+</BsModal>
+
+{{#if this.model.loadingBanner}}
+    <div class="dimmer"></div>
+    <div class="oxi-loading-banner">
+        <h4 class="alert alert-info" role="alert">
+            <span class="glyphicon glyphicon-refresh spin"></span>
+            &nbsp;{{this.model.loadingBanner}}
+        </h4>
+    </div>
+{{/if}}

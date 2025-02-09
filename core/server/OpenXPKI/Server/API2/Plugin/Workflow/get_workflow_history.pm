@@ -1,5 +1,5 @@
 package OpenXPKI::Server::API2::Plugin::Workflow::get_workflow_history;
-use OpenXPKI::Server::API2::EasyPlugin;
+use OpenXPKI -plugin;
 
 =head1 NAME
 
@@ -10,7 +10,7 @@ OpenXPKI::Server::API2::Plugin::Workflow::get_workflow_history
 # Project modules
 use OpenXPKI::Debug;
 use OpenXPKI::Server::Context qw( CTX );
-use OpenXPKI::Server::API2::Types;
+use OpenXPKI::Types;
 
 
 
@@ -66,6 +66,8 @@ command "get_workflow_history" => {
         params => { type => $wf_type,  handle => 'history' }
     );
 
+    # TODO - this duplicates code from the Persister and depends on the
+    # actual implementation. Should likely be replaced by persister call
     my $history = CTX('dbi')->select_hashes(
         from => 'workflow_history',
         columns => [ '*' ],

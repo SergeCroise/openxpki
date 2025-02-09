@@ -1,0 +1,36 @@
+{{#if this.content.user}}
+    <div class="userinfo text-nowrap">
+        <ul class="nav flex-column">
+            {{!-- template-lint-disable no-bare-strings --}}
+            <li class="text-end user">
+                {{t 'userinfo.name'}}
+                <strong>{{this.content.user.realname}} <span>({{this.content.user.role}})</span></strong>
+            </li>
+            <li class="text-end pki_realm">
+                {{t 'userinfo.realm'}}
+                <strong>{{this.content.user.pki_realm_label}} <span>({{this.content.user.pki_realm}})</span></strong>
+            </li>
+            {{#if this.content.user.last_login}}
+            <li class="text-end last_login">
+                {{t 'userinfo.last_login'}}
+                <strong><OxiBase::Formatted @format="timestamp" @value={{this.content.user.last_login}} @class="big" @truncate={{true}} /></strong>
+            </li>
+            {{/if}}
+            {{#if this.currentTenant}}
+                <li class="text-end tenant">
+                    {{#if this.hasMultipleTenants}}
+                        {{t 'userinfo.tenant'}}
+                        <OxiBase::Select
+                            @list={{this.content.user.tenants}}
+                            @selected={{this.content.tenant}}
+                            @onChange={{this.selectTenant}}
+                            @inline={{true}}
+                        />
+                    {{else}}
+                        {{t 'userinfo.tenant'}} <strong>{{this.currentTenant}}</strong>
+                    {{/if}}
+                </li>
+            {{/if}}
+        </ul>
+    </div>
+{{/if}}

@@ -3,50 +3,92 @@ set -e
 
 test -z $1 && echo "Please specify a command as argument" && exit 1 || true
 
-echo -e "\n[Copy source code without node_modules/]"
-OPTS=(--recursive --links --devices --specials --times --delete --inplace --quiet)
+RSYNC_OPTS=(--recursive --links --devices --specials --times --inplace --quiet)
+
+echo -e "\n[Copy source code without node_modules/, verdaccio-npm-cache/, docs-api/, dist/, dist-dev/, docker/]"
 
 # Do not use the bind-mounted node_modules/ from the host...
-if [ "$1" == "serve" ]; then
-  # in "serve" mode continuously sync code to allow Ember to pick up changes
-  # and do recompilation
-  (while true; do \
-    rsync "${OPTS[@]}" \
-      --exclude node_modules \
-      --exclude dist \
-      --exclude dist-dev \
-      --exclude docker \
-      /source/ /build; \
-    sleep 1; \
-  done) &
-else
-  rsync "${OPTS[@]}" \
+rsyncHostToContainer=(
+  rsync "${RSYNC_OPTS[@]}" --delete \
     --exclude node_modules \
+    --exclude verdaccio-npm-cache \
+    --exclude docs-api \
     --exclude dist \
     --exclude dist-dev \
     --exclude docker \
     /source/ /build
+)
+
+if [ "serve" == "$1" ]; then
+  # in "serve" mode continuously sync code to allow Ember to pick up changes
+  # and do recompilation
+  (while true; do "${rsyncHostToContainer[@]}"; sleep 1; done) &
+else
+  "${rsyncHostToContainer[@]}"
 fi
 
 # ...instead use /node_modules/ from the container
-rsync "${OPTS[@]}" \
-  /node_modules/ /build/node_modules
+ln -s /node_modules /build/node_modules
 
-if [[ "$1" == "serve" || "$1" == "build" ]]; then
-  cd /build
+cd /build
+
+if [ "update-ember" == "$1" ]; then
+  echo -e "\n[Update ember-cli and ember-cli-update]"
+  pnpm remove ember-cli ember-cli-update
+  pnpm add --save-dev ember-cli ember-cli-update
+
+  echo -e "\n[Update Ember app]"
+  # ember-cli-update expects a Git checkout
+  git config --global user.email "dummy@example.com"
+  git config --global user.name "Dummy"
+  git init
+  git add -A
+  git commit -m "Initial" -q
+  ./node_modules/.bin/ember-cli-update
+
+  echo -e "\n[Copy changes back to host]"
+  # we assume that we run in a clean Git checkout on the host (Makefile ensures that)
+  rsync "${RSYNC_OPTS[@]}" \
+    --exclude .git \
+    --exclude node_modules \
+    --exclude README.md \
+    /build/ /output
+
+  echo -e "\nDone.\nEmber source files were updated on your host."
+
+elif [ "update-deps" == "$1" ]; then
+  echo -e "\n[Install npm-check-updates]"
+  npm install -g npm-check-updates
+  echo -e "\n[Update Javascript dependencies]"
+  ncu -u
+  echo -e "\n[Update pnpm-lock.yaml]"
+  pnpm install
+  cp package.json pnpm-lock.yaml /output
+  echo -e "\nDone.\npackage.json and pnpm-lock.yaml were updated on your host."
+
+elif [ "update-lockfile" == "$1" ]; then
+  # in Dockerfile we run "pnpm install" so pnpm-lock.yaml is already updated
+  echo -e "\n[Copy pnpm-lock.yaml back to the host]"
+  cp pnpm-lock.yaml /output
+  echo -e "\nDone.\npnpm-lock.yaml was updated on your host."
+
+elif [ "add" == "$1" ]; then
+  module_list="$2"
+  echo -e "\n[Adding new modules to package.json as devDependencies]"
+  # https://github.com/dylanaraps/pure-bash-bible/blob/master/README.md#split-a-string-on-a-delimiter
+  set +e
+  IFS=$'\n' read -d "" -ra modules <<< "${module_list//,/$'\n'}"
+  set -e
+
+  for mod in "${modules[@]}"; do printf ' - %s\n' "$mod"; done
+  pnpm add --save-dev "${modules[@]}"
+
+  cp package.json pnpm-lock.yaml /output
+  echo -e "\nDone.\npackage.json and pnpm-lock.yaml were updated on your host."
+
+else # including "serve"
   echo -e "\n[pnpm run $1]"
   # The output path for compiled assets can be changed via
   # OPENXPKI_BUILD_OUTPUT_PATH (which is read in package.json).
   OPENXPKI_BUILD_OUTPUT_PATH=/compiled pnpm run "$1"
-  exit
-fi
-
-if [ "$1" == "update-ember" ]; then
-  echo -e "\n[Update ember-cli and ember-cli-update]"
-  pnpm remove ember-cli ember-cli-update
-  pnpm install --save-dev ember-cli ember-cli-update
-  cp package.json pnpm-lock.yaml /output
-
-  echo -e "\nDone.\npackage.json and pnpm-lock.yaml were updated on your host."
-  exit
 fi

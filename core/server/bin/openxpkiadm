@@ -16,6 +16,7 @@ use YAML;
 use MIME::Base64;
 use Crypt::X509;
 use JSON; # early use of JSON avoids "Subroutine JSON::PP::Boolean::(++ redefined at /usr/share/perl/5.28/overload.pm line 48"
+use Module::Load ();
 
 # For the password hasher
 use IO::Prompt;
@@ -31,7 +32,9 @@ use OpenXPKI::i18n;
 use OpenXPKI::Server::Context qw( CTX );
 use OpenXPKI::Config::Backend;
 use OpenXPKI::Client::Simple;
-use Log::Log4perl qw (:easy);
+use Log::Log4perl;
+use Log::Log4perl::Appender;
+use Log::Log4perl::Layout::PatternLayout;
 
 use OpenXPKI::VERSION;
 
@@ -1333,10 +1336,24 @@ sub __init {
 
     GetOptions( \%params, @options_spec ) or pod2usage( -verbose => 0 );
 
-    Log::Log4perl->easy_init( {
-        level    => defined $params{debug} ? $DEBUG : ( $params{verbose} ? $INFO : $WARN ),
-        layout   => '[%p] %m%n'
-    });
+    # Log4perl
+    my $app = Log::Log4perl::Appender->new(
+        "Log::Log4perl::Appender::ScreenColoredLevels",
+        utf8 => 1,
+        color => {
+            TRACE => 'white',
+            DEBUG => '',
+            INFO  => 'green',
+            WARN  => 'yellow',
+            ERROR => 'red',
+            FATAL => 'bright_red',
+        },
+    );
+    my $layout = Log::Log4perl::Layout::PatternLayout->new('[%p] %m%n');
+    $app->layout($layout);
+    my $log = Log::Log4perl->get_logger('');
+    $log->level(defined $params{debug} ? 'DEBUG' : ( $params{verbose} ? 'INFO' : 'WARN' ));
+    $log->add_appender($app);
 
     if ($params{config}) {
         # we set the ENV here to outrule an external ENV setting and to have
@@ -1386,7 +1403,7 @@ if ($cmd eq 'initdb') {
         );
         __init();
 
-        OpenXPKI::Server::Init::init({TASKS  => ['config_versioned','log','dbi_log','api2','crypto_layer','dbi'], SILENT => 1, CLI => 1});
+        OpenXPKI::Server::Init::init({TASKS  => ['config_versioned','log','dbi_log','metrics','api2','crypto_layer','dbi'], SILENT => 1, CLI => 1});
 
         $ret = certificate_id();
 
@@ -1422,7 +1439,7 @@ if ($cmd eq 'initdb') {
 
         __init();
 
-        OpenXPKI::Server::Init::init({TASKS  => ['config_versioned','log','dbi_log','api2','crypto_layer','dbi'], SILENT => 1, CLI => 1});
+        OpenXPKI::Server::Init::init({TASKS  => ['config_versioned','log','dbi_log','metrics','api2','crypto_layer','dbi'], SILENT => 1, CLI => 1});
 
         if (!$params{file}) {
             die "You need to specify the certificate to import with --file\n";
@@ -1445,7 +1462,7 @@ if ($cmd eq 'initdb') {
         );
         __init();
 
-        OpenXPKI::Server::Init::init({TASKS  => ['config_versioned','log','dbi_log','api2','crypto_layer','dbi'], SILENT => 1, CLI => 1});
+        OpenXPKI::Server::Init::init({TASKS  => ['config_versioned','log','dbi_log','metrics','api2','crypto_layer','dbi'], SILENT => 1, CLI => 1});
 
         __check_realm() if ($params{realm});
 
@@ -1463,7 +1480,7 @@ if ($cmd eq 'initdb') {
         );
         __init();
 
-        OpenXPKI::Server::Init::init({TASKS  => ['config_versioned','log','dbi_log','api2','crypto_layer','dbi'], SILENT => 1, CLI => 1});
+        OpenXPKI::Server::Init::init({TASKS  => ['config_versioned','log','dbi_log','metrics','api2','crypto_layer','dbi'], SILENT => 1, CLI => 1});
 
         $ret = certificate_chain();
 
@@ -1476,7 +1493,7 @@ if ($cmd eq 'initdb') {
         );
         __init();
 
-        OpenXPKI::Server::Init::init({TASKS  => ['config_versioned','log','dbi_log','api2','crypto_layer','dbi'], SILENT => 1, CLI => 1});
+        OpenXPKI::Server::Init::init({TASKS  => ['config_versioned','log','dbi_log','metrics','api2','crypto_layer','dbi'], SILENT => 1, CLI => 1});
 
         __check_realm();
 
@@ -1509,7 +1526,7 @@ if ($cmd eq 'initdb') {
     );
     __init();
 
-    OpenXPKI::Server::Init::init({TASKS  => ['config_versioned','log','dbi_log','api2','crypto_layer','dbi'], SILENT => 1, CLI => 1});
+    OpenXPKI::Server::Init::init({TASKS  => ['config_versioned','log','dbi_log','metrics','api2','crypto_layer','dbi'], SILENT => 1, CLI => 1});
 
     __check_realm() if (!$params{realm} || $params{realm} ne '_global');
 
@@ -1537,7 +1554,7 @@ if ($cmd eq 'initdb') {
         );
         __init();
 
-        OpenXPKI::Server::Init::init({TASKS  => ['config_versioned','log','api2','dbi'], SILENT => 1, CLI => 1});
+        OpenXPKI::Server::Init::init({TASKS  => ['config_versioned','log','metrics','api2','dbi'], SILENT => 1, CLI => 1});
 
         __check_realm();
 
@@ -1551,7 +1568,7 @@ if ($cmd eq 'initdb') {
           plain
     );
     __init();
-    OpenXPKI::Server::Init::init({TASKS  => ['config_versioned','log','api2','dbi'], SILENT => 1, CLI => 1});
+    OpenXPKI::Server::Init::init({TASKS  => ['config_versioned','log','metrics','api2','dbi'], SILENT => 1, CLI => 1});
 
     if (!$params{scheme}) {
         $params{scheme} = 'ssha256';
@@ -1646,6 +1663,8 @@ if ($cmd eq 'initdb') {
 
     push @options_spec, qw(
       module|m=s
+      realm=s
+      workflow=s
     );
     __init();
 
@@ -1660,20 +1679,19 @@ if ($cmd eq 'initdb') {
 
     -e $conf || die "Given config path $conf does not exist!";
 
-    my $c = OpenXPKI::Config::Backend->new( LOCATION => $conf );
     print "Checking config at $conf\n";
+    my $c = OpenXPKI::Config::Backend->new( LOCATION => $conf );
+
+    # YAML was ok but there is no system node
     if ($c->get_hash('system')) {
-        printf "Config ok (%s)\n", $c->checksum();
+        printf "Config is valid YAML (%s)\n", $c->checksum();
         $ret = 0;
     } else {
-        # this means the yaml was ok but there is no system node
-        if (defined $c) {
-            print "Config was parsed but no system node was found\n";
-        }
+        print "No 'system' node was found\n";
         $ret = 2;
     }
 
-    if (defined $params{debug}) {
+    if ($ret == 0 and defined $params{debug}) {
         my $hash = $c->get_hash('');
         if ($params{debug}) {
             printf "system config at %s:\n", $params{debug};
@@ -1690,20 +1708,28 @@ if ($cmd eq 'initdb') {
         print Dump $hash;
     }
 
-    foreach my $module (@{$params{module}}) {
-        my $class = "OpenXPKI::Config::Lint::". ucfirst($module);
-        eval "use $class;1";
-        if ($EVAL_ERROR) {
-            print "Unable to load lint module $module\n";
-            print STDERR $EVAL_ERROR;
-        } else {
-            print "Lint $module: ";
-            my $err = $class->new()->lint($c);
-            if ($err) {
-                print "\n$err\n";
-                $ret = 3
+    if ($ret == 0) {
+        foreach my $module (@{$params{module}}) {
+            my $uc_module = ucfirst($module);
+            my $class = "OpenXPKI::Config::Lint::$uc_module";
+            eval { Module::Load::load($class) };
+            if ($EVAL_ERROR) {
+                print "Unable to load lint module $uc_module\n";
+                print STDERR $EVAL_ERROR;
             } else {
-                print "ok\n";
+                print "Lint module '$uc_module':\n";
+                my $linter = $class->new(
+                    config => $c,
+                    $params{realm} ? (realm => $params{realm}) : (),
+                    $uc_module eq 'Workflow' && $params{workflow} ? (workflow => $params{workflow}) : (),
+                );
+                my $err = $linter->lint;
+                if ($err) {
+                    print "$err errors found.\n";
+                    $ret = 3
+                } else {
+                    print "OK.\n";
+                }
             }
         }
     }
@@ -2201,11 +2227,10 @@ location I</etc/openxpki/config.d> is used.
 
 Command options:
 
-  -- module  Specify extra modules to apply on the config object for
-             additional checks.
-
-  --debug               Dump the full config tree as YAML structure
-  --debug path.to.node  Dump the tree below this node as YAML structure
+  --module MODULE       Specify extra modules for additional checks
+  --realm REALM         Only test the given realm (for realm-specific modules)
+  --debug               Dump the full config tree as YAML
+  --debug path.to.node  Dump the tree below this node as YAML
 
 =head2 buildconfig
 

@@ -45,9 +45,10 @@ case "$1" in
                 if [ -e "/etc/openxpki/config.d/realm.tpl/auth/handler.yaml" ]; then
                     # replace the default password in the test handler
                     if [ -z "$OPENXPKI_TEST_PASSWORD" ]; then
-                        OPENXPKI_TEST_PASSWORD=$(openssl rand -base64 9)
+                        # the backslash messes up the sed call so we just replace it
+                        OPENXPKI_TEST_PASSWORD=$(openssl rand -base64 9 | tr '+/' _)
                     fi
-                    sed -r "s/digest:.*/digest: '{plain}$OPENXPKI_TEST_PASSWORD'/g" -i /etc/openxpki/config.d/realm.tpl/auth/handler.yaml
+                    sed -r "s/digest:.*/digest: '{plain}$OPENXPKI_TEST_PASSWORD'/" -i /etc/openxpki/config.d/realm.tpl/auth/handler.yaml
                     echo "OpenXPKI Password for Test Accounts was set to ##$OPENXPKI_TEST_PASSWORD##";
                 fi
             fi
@@ -116,7 +117,7 @@ case "$1" in
 
         # Create the sudo file to restart oxi from pkiadm
         if [ ! -e /etc/sudoers.d/pkiadm ] && [ -d /etc/sudoers.d ]; then
-            echo "pkiadm ALL=(ALL) NOPASSWD:/etc/init.d/openxpki" > /etc/sudoers.d/pkiadm
+            echo "pkiadm ALL=(ALL) NOPASSWD:service openxpkid" > /etc/sudoers.d/pkiadm
         fi;
 
         if [ -e "/var/openxpki/openxpki.socket" ]; then

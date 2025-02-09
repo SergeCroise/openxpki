@@ -1,5 +1,5 @@
 package OpenXPKI::Server::API2::Plugin::Cert::get_cert;
-use OpenXPKI::Server::API2::EasyPlugin;
+use OpenXPKI -plugin;
 
 =head1 NAME
 
@@ -9,7 +9,7 @@ OpenXPKI::Server::API2::Plugin::Cert::get_cert
 
 # Project modules
 use OpenXPKI::Server::Context qw( CTX );
-use OpenXPKI::Server::API2::Types;
+use OpenXPKI::Types;
 use OpenXPKI::Crypt::X509;
 use MIME::Base64;
 
@@ -47,6 +47,8 @@ B<Parameters>
 
 =item * attribute - expression for attributes to add, see get_cert_attributes
 
+=item * empty_ok - return undef instead of exception of cert does not exist
+
 =back
 
 B<Changes compared to API v1:>
@@ -71,6 +73,7 @@ command "get_cert" => {
     identifier => { isa => 'Base64', required => 1, },
     format     => { isa => 'AlphaPunct', matching => qr{ \A ( PEM | DER | TXT | TXTPEM | HASH | DBINFO | PKCS7 ) \Z }x, default => "HASH" },
     attribute  => { isa => 'ArrayRefOrStr', coerce => 1 },
+    empty_ok   => { isa => 'Bool' },
 } => sub {
     my ($self, $params) = @_;
 
@@ -85,11 +88,15 @@ command "get_cert" => {
         columns => [ '*' ],
         from => 'certificate',
         where => { 'identifier' => $identifier },
-    )
-        or OpenXPKI::Exception->throw(
+    );
+
+    if (!$cert) {
+        return if ($params->empty_ok);
+        OpenXPKI::Exception->throw(
             message => 'Could not find a certificate with identifier',
             params => { 'IDENTIFIER' => $identifier, },
         );
+    }
 
     if ($format eq 'PEM') {
         return $cert->{data};

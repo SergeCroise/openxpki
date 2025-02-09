@@ -1,5 +1,5 @@
 package OpenXPKI::Server::API2::Plugin::Api::api_list;
-use OpenXPKI::Server::API2::EasyPlugin;
+use OpenXPKI -plugin;
 
 =head1 NAME
 
@@ -18,7 +18,7 @@ command "api_list" => {
 } => sub {
     my ($self, $params) = @_;
 
-    return join "\n", sort keys %{ $self->rawapi->commands };
+    return join "\n", sort keys %{ $self->rawapi->namespace_commands };
 };
 
 __PACKAGE__->meta->make_immutable;

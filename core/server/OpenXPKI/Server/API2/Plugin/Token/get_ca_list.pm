@@ -1,5 +1,5 @@
 package OpenXPKI::Server::API2::Plugin::Token::get_ca_list;
-use OpenXPKI::Server::API2::EasyPlugin;
+use OpenXPKI -plugin;
 
 =head1 NAME
 
@@ -16,7 +16,9 @@ use OpenXPKI::Server::Context qw( CTX );
 use OpenXPKI::Server::API2::Plugin::Token::Util;
 
 # CPAN modules
-use Try::Tiny;
+
+# Feature::Compat::Try should be done last to safely disable warnings
+use Feature::Compat::Try;
 
 
 =head2 get_ca_list
@@ -131,9 +133,9 @@ command "get_ca_list" => {
                         : 'OFFLINE';
                 }
             }
-            catch {
-                CTX('log')->application()->error("Eval error testing CA token ".$row->{alias}." (API command 'get_ca_list'): $_");
-            };
+            catch ($err) {
+                CTX('log')->application->error("Error testing CA token ".$row->{alias}." (API command 'get_ca_list'): $err");
+            }
 
         }
         push @token, $item;

@@ -6,11 +6,10 @@ use warnings;
 # Core modules
 use English;
 use Errno;
+use File::Spec;
 
 # CPAN modules
 use Log::Log4perl;
-use Feature::Compat::Try;
-use Scalar::Util qw( blessed );
 
 # Project modules
 use OpenXPKI::Debug;
@@ -30,7 +29,9 @@ use OpenXPKI::Workflow::Handler;
 use OpenXPKI::Server::Context qw( CTX );
 use OpenXPKI::Server::Session;
 use OpenXPKI::Server::Bedroom;
+use OpenXPKI::Metrics;
 
+use Feature::Compat::Try; # should be done after other imports to safely disable warnings
 
 # define an array of hash refs mapping the task id to the corresponding
 # init code. the order of the array elements is also the default execution
@@ -44,6 +45,7 @@ my @INIT_TASKS = qw(
   dbi
   dbi_log
   crypto_layer
+  metrics
   api2
   workflow_factory
   volatile_vault
@@ -51,6 +53,7 @@ my @INIT_TASKS = qw(
   notification
   server
   bedroom
+  terminal
 );
 #
 
@@ -105,7 +108,7 @@ sub init {
             $func->($keys);
         }
         catch ($err) {
-            if (blessed $err and $err->isa('OpenXPKI::Exception')) {
+            if ($err->isa('OpenXPKI::Exception')) {
                 my $msg = $err->message || '<no message>';
                 log_wrapper("Error during initialization task '$task': $msg", "fatal");
                 $err->rethrow;
@@ -154,6 +157,10 @@ sub log_wrapper {
 sub get_remaining_init_tasks {
     my @remaining_tasks = map { not $IS_INITIALIZED{$_} } @INIT_TASKS;
     return @remaining_tasks;
+}
+
+sub get_init_tasks {
+    return @INIT_TASKS;
 }
 
 ###########################################################################
@@ -278,6 +285,12 @@ sub __do_init_dbi {
     OpenXPKI::Server::Context::setcontext({
         'dbi' => get_database("main", ($keys->{CLI} ? 1 : 0) )
     });
+    my $db_version = CTX('dbi')->version();
+    if (!$db_version) {
+        warn "Please set database schema version!";
+    }
+    ##! 32: 'db schema version is ' . $db_version
+    CTX('config')->set('system.version.dbschema', $db_version );
 }
 
 sub __do_init_acl {
@@ -338,6 +351,64 @@ sub __do_init_bedroom {
     ##! 1: "init bedroom"
     OpenXPKI::Server::Context::setcontext({
         'bedroom' => OpenXPKI::Server::Bedroom->new()
+    });
+}
+
+sub __do_init_terminal {
+    try {
+        # this is EE code:
+        require OpenXPKI::Server::ProcTerminal;
+    }
+    catch ($err) {
+        if ($err =~ m{locate OpenXPKI/Server/ProcTerminal\.pm in \@INC}) {
+            log_wrapper("NOT initializing 'terminal' - EE class not found");
+            return;
+        }
+        die $err;
+    }
+
+    my $config = CTX('config')->get_hash('system.terminal') // {};
+
+    my $manager = OpenXPKI::Server::ProcTerminal->new(
+        OpenXPKI::Server::Context::hascontext('log')
+            ? (log => CTX('log')->system)
+            : (),
+        config => $config,
+    );
+
+    OpenXPKI::Server::Context::setcontext({
+        'terminal' => $manager
+    });
+}
+
+sub __do_init_metrics {
+    my $enabled = CTX('config')->get(['system','metrics','enabled']) ? 1 : 0;
+
+    my $topics = CTX('config')->get_hash(['system','metrics','topic']) // {};
+
+    my $cache_conf = CTX('config')->get_hash(['system','metrics','cache']) // {};
+    my $cache_dir = $cache_conf->{dir}
+        // File::Spec->catdir(
+            CTX('config')->get(['system','server','tmpdir']) // '/var/tmp',
+            'openxpki.metrics'
+        );
+    my $cache_user  = $cache_conf->{user}  // CTX('config')->get(['system','server','user']) // $EUID;
+    my $cache_group = $cache_conf->{group} // CTX('config')->get(['system','server','group']) // (split ' ', $EGID)[0];
+
+    CTX('log')->system->info("Running metrics service: $enabled");
+
+    my $metrics = OpenXPKI::Metrics->new(
+        enabled => $enabled,
+        histogram_metrics => ($enabled && $topics->{histogram}),
+        workflow_metrics =>  ($enabled && $topics->{workflow}),
+        cache_dir => $cache_dir,
+        cache_user => $cache_user,
+        cache_group => $cache_group,
+        log => CTX('log')->system,
+    );
+
+    OpenXPKI::Server::Context::setcontext({
+        'metrics' => $metrics
     });
 }
 

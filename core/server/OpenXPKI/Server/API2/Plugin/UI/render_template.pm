@@ -1,5 +1,5 @@
 package OpenXPKI::Server::API2::Plugin::UI::render_template;
-use OpenXPKI::Server::API2::EasyPlugin;
+use OpenXPKI -plugin;
 
 =head1 NAME
 
@@ -7,15 +7,17 @@ OpenXPKI::Server::API2::Plugin::UI::render_template
 
 =cut
 
-use Try::Tiny;
 use YAML::Loader;
 use Data::Dumper;
 
 # Project modules
 use OpenXPKI::Server::Context qw( CTX );
-use OpenXPKI::Server::API2::Types;
+use OpenXPKI::Types;
 use OpenXPKI::Template;
 use OpenXPKI::Debug;
+
+# Feature::Compat::Try should be done last to safely disable warnings
+use Feature::Compat::Try;
 
 =head1 COMMANDS
 
@@ -84,6 +86,7 @@ command "render_yaml_template" => {
 
     ##! 64: $params->template
     ##! 128: $params->params
+    my $log = CTX('log')->system;
     my $oxtt = OpenXPKI::Template->new({ trim_whitespaces => 0 });
 
     my $yaml;
@@ -100,7 +103,7 @@ command "render_yaml_template" => {
     my $result = $oxtt->render($yaml, $params->params);
 
     ##! 64: 'Rendered YAML template: ' . $result
-    CTX('log')->system()->debug('Rendered YAML template: ' . $result);
+    $log->debug('Rendered YAML template: ' . $result);
 
     return unless($result);
 
@@ -109,15 +112,15 @@ command "render_yaml_template" => {
     try {
         $value = YAML::Loader->new->load($result);
     }
-    catch {
-        OpenXPKI::Exception->throw (
+    catch ($err) {
+        OpenXPKI::Exception->throw(
             message => "Error parsing YAML in 'yaml_template'",
-            params => { error => $_, yaml => $result }
+            params => { error => $err, yaml => $result }
         );
-    };
+    }
 
     $value = $value->{OXI_PLACEHOLDER} if ($has_head);
-    CTX('log')->system()->debug('Parsed Perl structure: ' . Dumper($value));
+    $log->trace('Parsed Perl structure: ' . Dumper($value)) if $log->is_trace;
     ##! 64: 'Parsed Perl structure: ' . Dumper($value)
     return $value;
 };

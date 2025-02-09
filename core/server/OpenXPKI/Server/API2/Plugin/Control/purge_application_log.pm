@@ -1,5 +1,5 @@
 package OpenXPKI::Server::API2::Plugin::Control::purge_application_log;
-use OpenXPKI::Server::API2::EasyPlugin;
+use OpenXPKI -plugin;
 
 =head1 NAME
 
@@ -9,7 +9,7 @@ OpenXPKI::Server::API2::Plugin::Control::purge_application_log
 
 # Project modules
 use OpenXPKI::Server::Context qw( CTX );
-use OpenXPKI::Server::API2::Types;
+use OpenXPKI::Types;
 
 
 

@@ -1,17 +1,11 @@
 package OpenXPKI::Server::NICE;
-
-use Moose;
-
-use English;
+use OpenXPKI -class;
 
 use Encode;
 use OpenXPKI::Server::Context qw( CTX );
-use OpenXPKI::Exception;
-use OpenXPKI::Debug;
 use OpenXPKI::Crypt::X509;
 use OpenXPKI::Serialization::Simple;
 use OpenXPKI::Server::Database::Legacy;
-use OpenXPKI::Server::Database; # to get AUTO_ID
 
 # Attribute Setup
 
@@ -118,17 +112,15 @@ sub __persistCertificateInformation {
     my $cert_data = $x509 ->db_hash();
     my $identifier = $cert_data->{identifier};
 
-    my $serializer = OpenXPKI::Serialization::Simple->new();
-
     if ($persist_data && (scalar keys %{$persist_data})) {
-        my $serialized_data = $serializer->serialize( $persist_data );
         ##! 16: 'Persist certificate: ' . $identifier
         ##! 32: 'persisted data: ' . Dumper( $persist_data )
         CTX('api2')->set_data_pool_entry(
             pki_realm => $pki_realm,
             namespace => 'nice.certificate.information',
             key       => $identifier,
-            value     => $serialized_data,
+            value     => $persist_data,
+            serialize => 'simple',
             encrypt   => 0,
             force     => 1,
         );
@@ -191,6 +183,8 @@ sub __persistCertificateInformation {
             status            => 'ISSUED',
         },
     );
+
+    my $serializer = OpenXPKI::Serialization::Simple->new;
 
     my @structured_subject_alt_names = @{$x509->get_subject_alt_name()};
     ##! 32: 'sans (structured): ' . Dumper \@structured_subject_alt_names
@@ -257,7 +251,7 @@ sub __import_chain {
         ##! 8: 'New intermediate was imported ' . $issuer_identifier
         if (my $issuer_group = $self->register_issuer()) {
             ##! 8: 'Register as issuer in ' . $issuer_group
-            my $issuer_alias = CTX('api2')->register_alias(
+            my $issuer_alias = CTX('api2')->create_alias(
                 identifier =>  $issuer_identifier,
                 alias_group => $issuer_group,
             );
@@ -285,15 +279,14 @@ sub __fetchPersistedCertificateInformation {
 
     my $pki_realm = CTX('api2')->get_pki_realm();
 
-    my $serialized_data = CTX('api2')->get_data_pool_entry(
+    my $data = CTX('api2')->get_data_pool_entry(
         pki_realm => $pki_realm,
         namespace => 'nice.certificate.information',
         key => $certificate_identifier,
+        deserialize => 'simple',
     );
 
-    my $serializer = OpenXPKI::Serialization::Simple->new();
-
-    return $serializer->deserialize( $serialized_data->{value} );
+    return $data->{value};
 
 }
 

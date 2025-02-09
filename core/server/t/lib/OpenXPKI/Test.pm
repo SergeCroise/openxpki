@@ -1,8 +1,5 @@
 package OpenXPKI::Test;
-
-use Moose;
-
-use utf8;
+use OpenXPKI qw( -class -typeconstraints );
 
 =head1 NAME
 
@@ -149,18 +146,17 @@ B<before> you use C<OpenXPKI::Test>:
 use Data::Dumper;
 use File::Path qw( remove_tree );
 use File::Temp qw( tempdir );
-use Module::Load qw( autoload );
+use Module::Load ();
+use MIME::Base64;
 
 # CPAN modules
-use Moose::Exporter;
 use Moose::Util;
 use Moose::Meta::Class;
-use Moose::Util::TypeConstraints;
+use Digest::SHA;
+use YAML::Tiny;
 use Test::More;
 use Test::Deep::NoTest qw( eq_deeply bag ); # use eq_deeply() without beeing in a test
-use Digest::SHA;
-use MIME::Base64;
-use YAML::Tiny;
+use Import::Into;
 
 # Project modules
 use OpenXPKI::Config;
@@ -168,7 +164,6 @@ use OpenXPKI::Log4perl;
 use Log::Log4perl::Appender;
 use Log::Log4perl::Filter::MDC;
 use Log::Log4perl::Layout::NoopLayout;
-use OpenXPKI::MooseParams;
 use OpenXPKI::Server::Database;
 use OpenXPKI::Server::Context;
 use OpenXPKI::Server::Init;
@@ -178,9 +173,9 @@ use OpenXPKI::Test::ConfigWriter;
 use OpenXPKI::Test::CertHelper::Database;
 use OpenXPKI::Test::Log4perlCallerFilter;
 
-Moose::Exporter->setup_import_methods(
-    as_is     => [ \&OpenXPKI::Server::Context::CTX ],
-);
+sub import ($class) {
+    OpenXPKI::Server::Context->import::into(1, qw( CTX ));
+}
 
 subtype 'TestArrayRefOrStr', as 'ArrayRef[Any]';
 coerce 'TestArrayRefOrStr', from 'Str', via { [ $_ ] };
@@ -580,7 +575,7 @@ around BUILDARGS => sub {
                 for my $namespace ("", "OpenXPKI::Test::Role::", "OpenXPKI::Test::QA::Role::") {
                     my $p = "${namespace}${shortname}";
                     # if package is not found, autoload() dies and eval() returns
-                    eval { autoload $p };
+                    eval { Module::Load::load($p) };
                     if (not $@) { $role = $p; last }
                 }
                 die "Could not find test class role '$shortname'" unless $role;
@@ -912,8 +907,21 @@ sub init_server {
     OpenXPKI::Server::Context::setcontext({ log => OpenXPKI::Server::Log->new(CONFIG => undef) })
         unless OpenXPKI::Server::Context::hascontext("log"); # may already be set if multiple instances of OpenXPKI::Test are created
 
-    # init basic CTX objects
-    my @tasks = qw( config_versioned dbi_log api2 authentication );
+    # init basic CTX objects: all those we do not explicitely skip
+    # (this way we do not need to adjust the test code if new INIT tasks are added)
+    my %skip_tasks = map { $_ => 1 } qw(
+        i18n
+        log
+        redirect_stderr
+        prepare_daemon
+        dbi
+        crypto_layer
+        workflow_factory
+        volatile_vault
+        notification
+        server
+    );
+    my @tasks = grep { !$skip_tasks{$_} } OpenXPKI::Server::Init::get_init_tasks();
 
     # init notification object if needed
     my $cfg_notification = "realm.".$self->default_realm.".notification";
@@ -1012,7 +1020,7 @@ sub set_user {
             PARAMS => { LOGIN => $user, PASSWD => $self->password },
         },
     });
-;
+
     die "Could not set user to '$user' " unless(ref $reply eq 'OpenXPKI::Server::Authentication::Handle');
 
     my $userid = $reply->userid;
@@ -1091,21 +1099,23 @@ B<Parameters>
 =back
 
 =cut
-sub insert_testcerts {
-    my ($self, %args) = named_args(\@_,
-        exclude => { isa => 'ArrayRef', optional => 1 },
-        only => { isa => 'ArrayRef', optional => 1 },
-    );
-
-    die "Either specify 'only' or 'exclude', not both." if $args{only} && $args{exclude};
+signature_for insert_testcerts => (
+    method => 1,
+    named => [
+        exclude => 'Optional[ ArrayRef ]',
+        only    => 'Optional[ ArrayRef ]',
+    ],
+);
+sub insert_testcerts ($self, $arg) {
+    die "Either specify 'only' or 'exclude', not both." if ($arg->only and $arg->exclude);
 
     my $certhelper = $self->certhelper_database;
     my $certnames;
-    if ($args{only}) {
-        $certnames = $args{only};
+    if ($arg->only) {
+        $certnames = $arg->only;
     }
-    elsif ($args{exclude}) {
-        my $exclude = { map { $_ => 1 } @{ $args{exclude} } };
+    elsif ($arg->exclude) {
+        my $exclude = { map { $_ => 1 } @{ $arg->exclude } };
         $certnames = [ grep { not $exclude->{$_} } $certhelper->all_cert_names ];
     }
     else {

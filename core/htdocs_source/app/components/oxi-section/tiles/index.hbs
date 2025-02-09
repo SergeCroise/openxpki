@@ -1,0 +1,23 @@
+<!-- components/oxi-section/tiles -->
+{{#if @def.tiles.length}}
+    <div class="row">
+        <div class="mx-auto">
+            <p class="text-{{this.align}}">
+                {{#each this.tiles as |tile|}}
+                    {{#if (eq tile.type "button")}}
+                        <OxiBase::Button @button={{tile.content}}>
+                            {{#if tile.content.image}}
+                                <img src={{tile.content.image}} alt="" role="presentation"/>
+                                <br/>
+                            {{/if}}
+                            {{tile.content.label}}
+                        </OxiBase::Button>
+                    {{/if}}
+                    {{#if (eq tile.type "newline")}}
+                        <br/>
+                    {{/if}}
+                {{/each}}
+            </p>
+        </div>
+    </div>
+{{/if}}

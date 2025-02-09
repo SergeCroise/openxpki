@@ -1,0 +1,31 @@
+<OxiBase::Clickable @clickable={{this.clickable}} as |clickHandler isLoading|>
+    {{!-- <a href> mode --}}
+    {{#if this.clickable.href}}
+        <a
+            ...attributes
+            class="btn {{this.formatCSSClass}}"
+            href={{this.clickable.href}}
+            target={{this.clickable.target}}
+            {{on "click" clickHandler}}
+        >
+            {{#if @button.tooltip}} <Tippy>{{@button.tooltip}}</Tippy> {{/if}}
+            {{#if (has-block)}} {{yield}} {{else}} {{@button.label}} {{/if}}
+            {{#if isLoading}} <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> {{/if}}
+        </a>
+
+    {{!-- <button> mode (if "action", "page" or "onClick" was specified) --}}
+    {{else}}
+        <BsButton
+            ...attributes
+            @type=""
+            class={{this.formatCSSClass}}
+            disabled={{or this.clickable.disabled isLoading}}
+            @onClick={{clickHandler}}
+        >
+            {{#if @button.tooltip}} <Tippy>{{@button.tooltip}}</Tippy> {{/if}}
+            {{#if (has-block)}} {{yield}} {{else}} {{@button.label}} {{/if}}
+            {{#if isLoading}} <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> {{/if}}
+        </BsButton>
+    {{/if}}
+
+</OxiBase::Clickable>

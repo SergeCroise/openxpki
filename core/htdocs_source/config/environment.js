@@ -1,20 +1,16 @@
 'use strict';
 
 module.exports = function (environment) {
-  let ENV = {
+  const ENV = {
     modulePrefix: 'openxpki',
-    podModulePrefix: 'openxpki/pods',   // namespaced directory where resolver will look for resource files
+    podModulePrefix: 'openxpki/route-pods', // where resolver will look for resource files (we only use /route-pods/ for routes)
     environment,
-    rootURL: '/openxpki/',  // https://guides.emberjs.com/release/configuring-ember/embedding-applications/#toc_specifying-a-root-url
     locationType: 'hash',   // https://guides.emberjs.com/release/configuring-ember/specifying-url-type/
     EmberENV: {
+      EXTEND_PROTOTYPES: false,
       FEATURES: {
         // Here you can enable experimental features on an ember canary build
         // e.g. EMBER_NATIVE_DECORATOR_SUPPORT: true
-      },
-      EXTEND_PROTOTYPES: {
-        // Prevent Ember Data from overriding Date.parse.
-        Date: false,
       },
     },
 
@@ -32,7 +28,12 @@ module.exports = function (environment) {
   /*
    * Mode specific
    */
-  if (environment === 'development') {
+  if ('development' === environment) {
+    /*
+     * /webui/democa/ is required in development as "ember serve" will
+     * redirect asset requests to the backend otherwise (no hot reload etc.).
+     */
+    ENV.rootURL = '/webui/democa/'  // https://guides.emberjs.com/release/configuring-ember/embedding-applications/#toc_specifying-a-root-url
     /*
      * Set up logging
      * https://guides.emberjs.com/release/configuring-ember/debugging/
@@ -44,7 +45,10 @@ module.exports = function (environment) {
     ENV.APP.LOG_VIEW_LOOKUPS = true;
   }
 
-  if (environment === 'test') {
+  // Embroider also seems to run with env "test" when doing "ember serve"
+  if ('test' === environment) {
+    ENV.rootURL = '/webui/democa/'
+
     // Testem prefers this...
     ENV.locationType = 'none';
 
@@ -56,8 +60,13 @@ module.exports = function (environment) {
     ENV.APP.autoboot = false;
   }
 
-  if (environment === 'production') {
-    // here you can enable a production-specific feature
+  if ('production' === environment) {
+    /*
+     * An empty rootURL results in relative asset URLs instead of absolute
+     * ones in index.html. This allows the application to run on any server
+     * path like /webui/REALM/ or /openxpki/ or others.
+     */
+    ENV.rootURL = ''
   }
 
   return ENV;

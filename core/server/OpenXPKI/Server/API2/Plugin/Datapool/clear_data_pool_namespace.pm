@@ -1,5 +1,5 @@
 package OpenXPKI::Server::API2::Plugin::Datapool::clear_data_pool_namespace;
-use OpenXPKI::Server::API2::EasyPlugin;
+use OpenXPKI -plugin;
 
 with 'OpenXPKI::Server::API2::Plugin::Datapool::Util';
 
@@ -12,7 +12,7 @@ OpenXPKI::Server::API2::Plugin::Datapool::clear_data_pool_namespace
 # Project modules
 use OpenXPKI::Debug;
 use OpenXPKI::Server::Context qw( CTX );
-use OpenXPKI::Server::API2::Types;
+use OpenXPKI::Types;
 
 =head1 COMMANDS
 

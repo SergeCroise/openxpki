@@ -1,0 +1,42 @@
+{{#if (or this.hasButtons (has-block))}}
+    <div class="oxi-button-container mt-3">
+        {{#if this.hasDescription}}
+
+            {{#each this.buttons as |btn index|}}
+                <div class="row align-items-center my-2">
+                    {{#if btn.section}}
+                        <div class="col-12">
+                            <strong>{{btn.section}}</strong>
+                        </div>
+                    {{else}}
+                        <div class="col-12 col-sm-6 col-lg-4 order-2 order-sm-1 pb-2 pb-sm-0">
+                            <OxiBase::Button @button={{btn}} class="d-block w-100" />
+                        </div>
+                        <div class="col-12 col-sm-6 col-lg-8 order-1 order-sm-2">
+                            {{#if btn.description}}
+                                {{btn.description}}<span class="d-inline d-sm-none">:</span>
+                            {{/if}}
+                        </div>
+                    {{/if}}
+                </div>
+            {{/each}}
+
+        {{else}}
+            <div class="row row-cols-1 row-cols-sm-{{this.maxButtonsPerRow}} align-items-stretch my-2 g-2">
+                {{#each this.buttons as |btn|}}
+                    {{#if btn.empty}}
+                        <!-- Force next columns to break to new line at md breakpoint and up -->
+                        <div class="w-100 d-none d-md-block"></div>
+                    {{else if btn.section}}
+                        <!-- Sections are not supported yet -->
+                    {{else}}
+                        <div class="col">
+                            <OxiBase::Button @button={{btn}} class="d-block d-sm-flex w-100 h-100 align-items-center justify-content-center" />
+                        </div>
+                    {{/if}}
+                {{/each}}
+            </div>
+
+        {{/if}}
+    </div>
+{{/if}}

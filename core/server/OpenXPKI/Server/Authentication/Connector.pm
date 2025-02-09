@@ -9,7 +9,7 @@ use OpenXPKI::Debug;
 use OpenXPKI::Server::Authentication::Handle;
 use OpenXPKI::Server::Context qw( CTX );
 
-use Moose::Util::TypeConstraints;
+use Moose::Util::TypeConstraints; # PLEASE NOTE: this enables all warnings via Moose::Exporter
 
 
 has '+role' => (
@@ -57,7 +57,7 @@ sub handleInput {
     my $result;
     eval {
         my $mode = $self->mode();
-        $self->logger->debug("Query username $username with mode $mode");
+        $self->log->debug("Query username $username with mode $mode");
         # combined mode, make a "bind" query with get_hash
         # using a non-empty response as userinfo
         if ($mode eq 'combined') {

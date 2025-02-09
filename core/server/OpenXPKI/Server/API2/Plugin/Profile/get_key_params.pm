@@ -1,5 +1,5 @@
 package OpenXPKI::Server::API2::Plugin::Profile::get_key_params;
-use OpenXPKI::Server::API2::EasyPlugin;
+use OpenXPKI -plugin;
 
 =head1 NAME
 
@@ -29,7 +29,7 @@ B<Parameters>
 
 =item * C<profile> I<Str> - certificate profile, required
 
-=item * C<alg> I<Str> - algorithm, default: all algorithms
+=item * C<alg> I<Str> - algorithm, required
 
 =item * C<showall> I<Bool> - also show hidden algorithms (beginning with an underscore)
 
@@ -40,15 +40,10 @@ B<Changes compared to API v1:> Parameter C<NOHIDE> was renamed to C<showall>
 =cut
 command "get_key_params" => {
     profile => { isa => 'AlphaPunct', required => 1, },
-    alg     => { isa => 'AlphaPunct', },
+    alg     => { isa => 'AlphaPunct', required => 1, },
     showall => { isa => 'Bool', default => 0, },
 } => sub {
     my ($self, $params) = @_;
-
-    if (not $params->has_alg) {
-        # TODO - grab that from the config
-        return [ 'key_length', 'curve_name' ];
-    }
 
     my $profile = $params->profile;
     my $algorithm = $params->alg;

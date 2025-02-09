@@ -8,8 +8,10 @@ site:
     loading: "Loading..."
     redirecting: "Redirecting..."
   close_popup: "Close"
+  back: "Back"
   workflow_info: "Workflow"
   old_browser: "You are using an old browser version: {browser}. This may result in problems when using OpenXPKI."
+  session_renewed: "You have logged in again in another browser window.\nThe login session has been renewed, please repeat the action you just performed."
 
 userinfo:
   name: "Signed in as"
@@ -21,8 +23,8 @@ error_popup:
   header: "Application Error"
   message:
     server: "The server did not return the expected data.<br>Maybe your authentication session has expired or there is an internal error.<br>HTTP code: {code}"
-    network: "The server connection seems to be lost: {reason}"
-    client: "There was an error while processing the data received from the server: {reason}"
+    network: "The server connection seems to be lost:<br>\"{reason}\""
+    client: "There was an error while processing the data received from the server:<br>\"{reason}\""
   reload: "Reload application"
 
 pagination:
@@ -35,6 +37,10 @@ button:
   confirm_dialog:
     ok: "Confirm"
     cancel: "Abort"
+  workflow:
+    copy_id:
+      label: "Workflow #{id}"
+      tooltip: "Copy workflow ID"
 
 component:
   oxifield_datetime:

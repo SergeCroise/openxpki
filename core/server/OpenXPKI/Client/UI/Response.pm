@@ -74,11 +74,6 @@ has 'headers' => (
 #   documentation => '...' tells OpenXPKI::Client::UI::Response::DTORole->resolve
 #   to use the given name (not the attribute name) as hash key for this value.
 #
-has_dto 'infobox' => (
-    documentation => 'right',
-    class => 'OpenXPKI::Client::UI::Response::Sections',
-);
-
 has 'language' => (
     is => 'rw',
     isa => 'Str',
@@ -128,6 +123,11 @@ has_dto 'user' => (
     class => 'OpenXPKI::Client::UI::Response::User',
 );
 
+has 'pki_realm' => (
+    is => 'rw',
+    isa => 'Str',
+);
+
 sub set_page { shift->page(OpenXPKI::Client::UI::Response::PageInfo->new(@_)) }
 sub set_refresh { shift->refresh(OpenXPKI::Client::UI::Response::Refresh->new(@_)) }
 sub set_user { shift->user(OpenXPKI::Client::UI::Response::User->new(@_)) }
@@ -147,7 +147,7 @@ sub get_header_str {
 
     return $cgi->header(
         @{ $self->headers },
-        -cookie => $self->session_cookie->build,
+        -cookie => $self->session_cookie->render,
     )
 }
 

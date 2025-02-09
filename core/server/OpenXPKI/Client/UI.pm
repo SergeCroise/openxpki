@@ -5,23 +5,33 @@ use English;
 
 # Core modules
 use Encode;
+use JSON qw(encode_json decode_json);
 use Data::Dumper;
 use MIME::Base64;
 use Module::Load ();
 
 # CPAN modules
 use CGI::Session;
+use Crypt::JWT qw( encode_jwt decode_jwt );
 use URI::Escape;
 use Log::Log4perl::MDC;
-use Crypt::JWT qw( encode_jwt decode_jwt );
-use Feature::Compat::Try;
+use LWP::UserAgent;
+use HTTP::Request;
+use Moose::Util::TypeConstraints qw( enum ); # PLEASE NOTE: this enables all warnings via Moose::Exporter
+use Type::Params qw( signature_for );
 
 # Project modules
+use OpenXPKI::Dumper;
 use OpenXPKI::Template;
 use OpenXPKI::Client;
-use OpenXPKI::i18n qw( i18nGettext );
 use OpenXPKI::Client::UI::Bootstrap;
 use OpenXPKI::Client::UI::Login;
+
+# Feature::Compat::Try should be done last to safely disable warnings
+use Feature::Compat::Try;
+
+# should be done after imports to safely disable warnings in Perl < 5.36
+use experimental 'signatures';
 
 # ref to the cgi frontend session
 has 'session' => (
@@ -30,11 +40,85 @@ has 'session' => (
     isa => 'CGI::Session|Undef',
 );
 
+# cipher object to encryt/decrypt protected values
+has 'cipher' => (
+    is => 'ro',
+    isa => 'Crypt::CBC',
+    predicate => 'has_cipher',
+);
+
 # Response structure (JSON or some raw bytes) and HTTP headers
 has 'resp' => (
+    required => 1,
     is => 'rw',
     isa => 'OpenXPKI::Client::UI::Response',
+);
+
+has 'realm_mode' => (
     required => 1,
+    is => 'rw',
+    isa => enum([qw(
+        select
+        path
+        hostname
+        fixed
+    )]),
+);
+
+has 'realm_layout' => (
+    required => 1,
+    is => 'rw',
+    isa => enum([qw(
+        card
+        list
+    )]),
+);
+
+has 'socket_path' => (
+    required => 1,
+    is => 'ro',
+    isa => 'Str',
+);
+
+has 'script_url' => (
+    required => 1,
+    is => 'ro',
+    isa => 'Str',
+);
+
+has 'log' => (
+    required => 1,
+    is => 'ro',
+    isa => 'Object', # Log::Log4perl::Logger or OpenXPKI::Log4perl::MojoLogger
+);
+
+has 'login_page' => (
+    is => 'ro',
+    isa => 'Str',
+);
+
+has 'login_url' => (
+    is => 'ro',
+    isa => 'Str',
+);
+
+has 'static_dir' => (
+    is => 'ro',
+    isa => 'Str',
+);
+
+# Only if realm_mode=path: a map of realms to URL paths
+# {
+#     realma => [
+#         { url => 'realm-a', stack => 'LocalPassword' },
+#         { url => 'realm-a-cert', stack => 'Certificate' },
+#     ],
+#     realmb => ...
+# }
+has 'realm_path_map' => (
+    is => 'ro',
+    isa => 'HashRef',
+    default => sub { {} },
 );
 
 # the OXI::Client object
@@ -44,21 +128,6 @@ has 'backend' => (
     lazy => 1,
     builder => '_init_backend',
     trigger => \&_init_backend,
-);
-
-# should be passed by the ui script to be shared, if not we create it
-has 'logger' => (
-    is => 'ro',
-    isa => 'Log::Log4perl::Logger',
-    lazy => 1,
-    default => sub{ return Log::Log4perl->get_logger( ); },
-);
-
-has '_config' => (
-    required => 1,
-    is => 'ro',
-    isa => 'HashRef',
-    init_arg => 'config',
 );
 
 # holds key object to sign socket communication
@@ -82,35 +151,34 @@ sub _init_backend {
 
     if (!$client) {
         $client = OpenXPKI::Client->new({
-            SOCKETFILE => $self->_config()->{'socket'},
+            SOCKETFILE => $self->socket_path,
         });
-        $self->logger()->debug('Create backend client instance');
+        $self->log->debug('Create backend client instance');
     } else {
-        $self->logger()->debug('Use provided client instance');
+        $self->log->debug('Use provided client instance');
     }
 
     my $client_id = $client->get_session_id();
-    my $session = $self->session();
-    my $backend_id =  $session->param('backend_session_id') || undef;
+    my $backend_id =  $self->session->param('backend_session_id') || undef;
 
     if ($backend_id and $client_id and $backend_id eq $client_id) {
-        $self->logger()->debug('Backend session already loaded');
+        $self->log->debug('Backend session already loaded');
     } else {
         eval {
-            $self->logger()->debug('First session reinit with id ' . ($backend_id || 'init'));
+            $self->log->debug('First session reinit with id ' . ($backend_id || 'init'));
             $client->init_session({ SESSION_ID => $backend_id });
         };
         if (my $eval_err = $EVAL_ERROR) {
             my $exc = OpenXPKI::Exception->caught();
             if ($exc && $exc->message() eq 'I18N_OPENXPKI_CLIENT_INIT_SESSION_FAILED') {
-                $self->logger()->info('Backend session was gone - start a new one');
+                $self->log->info('Backend session was gone - start a new one');
                 # The session has gone - start a new one - might happen if the gui
                 # was idle too long or the server was flushed
                 $client->init_session({ SESSION_ID => undef });
-                $self->resp->status->warn(i18nGettext('I18N_OPENXPKI_UI_BACKEND_SESSION_GONE'));
+                $self->resp->status->warn('I18N_OPENXPKI_UI_BACKEND_SESSION_GONE');
             } else {
-                $self->logger()->error('Error creating backend session: ' . $eval_err->{message});
-                $self->logger()->trace($eval_err);
+                $self->log->error('Error creating backend session: ' . $eval_err->{message});
+                $self->log->trace($eval_err);
                 die "Backend communication problem";
             }
         }
@@ -120,17 +188,16 @@ sub _init_backend {
 
     # logging stuff only
     if ($backend_id and $client_id eq $backend_id) {
-        $self->logger()->info('Resume backend session with id ' . $client_id);
+        $self->log->info('Resume backend session with id ' . $client_id);
     } elsif ($backend_id) {
-        $self->logger()->info('Re-Init backend session ' . $client_id . '/' . $backend_id );
+        $self->log->info('Re-Init backend session ' . $client_id . '/' . $backend_id );
     } else {
-        $self->logger()->info('New backend session with id ' . $client_id);
+        $self->log->info('New backend session with id ' . $client_id);
     }
-    $session->param('backend_session_id', $client_id);
+    $self->session->param('backend_session_id', $client_id);
 
     Log::Log4perl::MDC->put('ssid', substr($client_id,0,4));
 
-    $self->logger()->trace( Dumper $session->dataref ) if $self->logger->is_trace;
     return $client;
 }
 
@@ -138,12 +205,11 @@ sub _init_backend {
 sub BUILD {
     my $self = shift;
 
-    if (!$self->session()->param('initialized')) {
-        my $session = $self->session();
-        $session->param('initialized', 1);
-        $session->param('is_logged_in', 0);
-        $session->param('user', undef);
-    } elsif (my $user = $self->session()->param('user')) {
+    if (not $self->session->param('initialized')) {
+        $self->session->param('initialized', 1);
+        $self->session->param('is_logged_in', 0);
+        $self->session->param('user', undef);
+    } elsif (my $user = $self->session->param('user')) {
         Log::Log4perl::MDC->put('name', $user->{name});
         Log::Log4perl::MDC->put('role', $user->{role});
     } else {
@@ -162,19 +228,23 @@ sub handle_request {
     my $page = $req->param('page') || '';
     my $action = $self->__get_action($req);
 
-    $self->logger()->debug('Incoming request: ' . join(', ', $page ? "page '$page'" : (), $action ? "action '$action'" : ()));
+    $self->log->debug('Incoming request: ' . join(', ', $page ? "page '$page'" : (), $action ? "action '$action'" : ()));
 
     # Check for goto redirection first
     if ($action =~ /^redirect!(.+)/  || $page =~ /^redirect!(.+)/) {
         my $goto = $1;
+        if ($goto =~ m{[^\w\-\!]}) {
+            $goto = 'home';
+            $self->log->warn("Invalid redirect target found - aborting");
+        }
         my $result = OpenXPKI::Client::UI::Result->new(
             client => $self,
             req => $req,
             resp => $self->resp,
         );
-        $self->logger()->debug("Send redirect to $goto");
+        $self->log->debug("Send redirect to $goto");
         $result->redirect->to($goto);
-        return $result->render();
+        return $result;
     }
 
     # Handle logout / session restart
@@ -184,36 +254,36 @@ sub handle_request {
 
         # For SSO Logins the session might hold an external link
         # to logout from the SSO provider
-        my $authinfo = $self->session()->param('authinfo') || {};
+        my $authinfo = $self->session->param('authinfo') || {};
         my $redirectTo = $authinfo->{logout};
 
         # clear the session before redirecting to make sure we are safe
         $self->logout_session( $cgi );
-        $self->logger()->info('Logout from session');
+        $self->log->info('Logout from session');
 
         # now perform the redirect if set
         if ($redirectTo) {
-            $self->logger()->debug("External redirect on logout to " . $redirectTo);
+            $self->log->debug("External redirect on logout to " . $redirectTo);
             my $result = OpenXPKI::Client::UI::Result->new(
                 client => $self,
                 req => $req,
                 resp => $self->resp,
             );
             $result->redirect->to($redirectTo);
-            return $result->render();
+            return $result;
         }
 
     }
 
     my $reply = $self->backend()->send_receive_service_msg('PING');
     my $status = $reply->{SERVICE_MSG};
-    $self->logger()->trace('Ping replied ' . Dumper $reply) if $self->logger->is_trace;
-    $self->logger()->debug('current session status ' . $status);
+    $self->log->trace('Ping replied ' . Dumper $reply) if $self->log->is_trace;
+    $self->log->debug('Current session status ' . $status);
 
     if ( $reply->{SERVICE_MSG} eq 'START_SESSION' ) {
         $reply = $self->backend()->init_session();
-        $self->logger()->debug('Init new session');
-        $self->logger()->trace('Init replied ' . Dumper $reply) if $self->logger->is_trace;
+        $self->log->debug('Init new session');
+        $self->log->trace('Init replied ' . Dumper $reply) if $self->log->is_trace;
     }
 
     if ( $reply->{SERVICE_MSG} eq 'ERROR' ) {
@@ -222,9 +292,9 @@ sub handle_request {
             req => $req,
             resp => $self->resp,
         );
-        $self->logger()->debug("Got error from server");
+        $self->log->debug("Got error from server");
         $result->set_status_from_error_reply($reply);
-        return $result->render;
+        return $result;
     }
 
 
@@ -236,7 +306,7 @@ sub handle_request {
             resp => $self->resp,
         );
         $result->init_structure;
-        return $result->render;
+        return $result;
     }
 
     # Only handle requests if we have an open channel
@@ -246,7 +316,7 @@ sub handle_request {
 
     # if the backend session logged out but did not terminate
     # we get the problem that ui is logged in but backend is not
-    $self->logout_session( $cgi ) if ($self->session()->param('is_logged_in'));
+    $self->logout_session( $cgi ) if ($self->session->param('is_logged_in'));
 
     # try to log in
     return $self->handle_login( { req => $req, reply => $reply } );
@@ -263,66 +333,67 @@ array). On error, both elements in the array are set to undef.
 
 =cut
 
-sub __load_class {
+signature_for __load_class => (
+    method => 1,
+    named => [
+        call => 'Str',
+        req  => 'OpenXPKI::Client::UI::Request',
+        is_action  => 'Bool', { default => 0 },
+    ],
+);
+sub __load_class ($self, $arg) {
 
-    my $self = shift;
-    my $call = shift;
-    my $req = shift;
-    my $is_action = shift;
+    $self->log->debug("Trying to load class for call: " . $arg->call);
 
-    $self->logger->debug("Trying to load class for call: $call");
-
-    my ($class, $remainder) = ($call =~ /\A (\w+)\!? (.*) \z/xms);
+    my ($class, $remainder) = ($arg->call =~ /\A (\w+)\!? (.*) \z/xms);
     my ($method, $param_raw);
 
-    if (!$class) {
-        $self->logger->error("Failed to parse page load string $call");
+    if (not $class) {
+        $self->log->error("Failed to parse page load string: " . $arg->call);
         return;
     }
 
-    my $params = {};
     # the request is encoded in an encrypted jwt structure
     if ($class eq 'encrypted') {
-        # TODO - consolidate with JWT code from Request.pm
-        my $jwt_key = $self->session->param('jwt_encryption_key');
-        unless ($jwt_key) {
-            $self->logger->debug("JWT encrypted request but client session contains no decryption key");
-            return;
-        }
         # as the token has non-word characters the above regex does not contain the full payload
         # we therefore read the payload directly from call stripping the class name
-        my $decoded = $req->_decrypt_jwt($remainder);
-        if ($decoded->{page}) {
-            $self->logger->debug("Encrypted request with page " . $decoded->{page});
-            ($class, $method) = ($decoded->{page} =~ /\A (\w+)\!? (\w+)? \z/xms);
+        my $decrypted = $arg->req->_decrypt_jwt($remainder) or return;
+        if ($decrypted->{page}) {
+            $self->log->debug("Encrypted request with page " . $decrypted->{page});
+            ($class, $method) = ($decrypted->{page} =~ /\A (\w+)\!? (\w+)? \z/xms);
         } else {
-            $class = $decoded->{class};
-            $method = $decoded->{method};
+            $class = $decrypted->{class};
+            $method = $decrypted->{method};
         }
-        my %secure = map { $_ =~ m{\A(page|class|method)\z} ? () : ($_ => $decoded->{$_})  } keys %$decoded;
-        $self->logger->debug("Encrypted request to $class / $method");
-        $self->logger->trace("Encrypted request secure params " . Dumper \%secure ) if ($self->logger->is_trace && (keys %secure));
-        $params->{__secure} = { %secure, (__jwt_key => $jwt_key ) };
+        my $secure_params = $decrypted->{secure_param} // {};
+        $self->log->debug("Encrypted request to $class / $method");
+        $self->log->trace("Secure params: " . Dumper $secure_params) if ($self->log->is_trace and keys $secure_params->%*);
+        $arg->req->add_secure_params($secure_params->%*);
     }
     else {
         ($method, $param_raw) = ($remainder =~ /\A (\w+)? \!?(.*) \z/xms);
         if ($param_raw) {
+            my $params = {};
             my @parts = split /!/, $param_raw;
             while (my $key = shift @parts) {
                 my $val = shift @parts // '';
                 $params->{$key} = Encode::decode("UTF-8", uri_unescape($val));
             }
-            $self->logger->trace("Found extra params: " . Dumper $params) if $self->logger->is_trace;
+            $self->log->trace("Found extra params: " . Dumper $params) if $self->log->is_trace;
+            $arg->req->add_params($params->%*);
         }
     }
 
     $method  = 'index' unless $method;
+    my $fullmethod = $arg->is_action ? "action_$method" : "init_$method";
 
     my @variants;
     # action!...
-    if ($is_action) {
+    if ($arg->is_action) {
         @variants = (
             sprintf("OpenXPKI::Client::UI::%s::Action::%s", ucfirst($class), ucfirst($method)),
+            sprintf("OpenXPKI::Client::UI::%s::%s", ucfirst($class), $fullmethod),
+            sprintf("OpenXPKI::Client::UI::%s::%s", ucfirst($class), ucfirst($method)),
             sprintf("OpenXPKI::Client::UI::%s::Action", ucfirst($class)),
             sprintf("OpenXPKI::Client::UI::%s", ucfirst($class)),
         );
@@ -330,6 +401,8 @@ sub __load_class {
     # init!...
     else {
         @variants = (
+            sprintf("OpenXPKI::Client::UI::%s::Init::%s", ucfirst($class), ucfirst($method)),
+            sprintf("OpenXPKI::Client::UI::%s::%s", ucfirst($class), $fullmethod),
             sprintf("OpenXPKI::Client::UI::%s::%s", ucfirst($class), ucfirst($method)),
             sprintf("OpenXPKI::Client::UI::%s::Init", ucfirst($class)),
             sprintf("OpenXPKI::Client::UI::%s", ucfirst($class)),
@@ -339,24 +412,30 @@ sub __load_class {
     for my $pkg (@variants) {
         try {
             Module::Load::load($pkg);
-            $self->logger->debug("Handler class '$pkg' loaded");
+            $self->log->debug("$pkg loaded, testing method availability");
         }
         catch ($err) {
-            next;
+            next if $err =~ /^Can't locate/;
+            die $err;
         }
-        die "Package $pkg must inherit from OpenXPKI::Client::UI::Result" unless $pkg->isa('OpenXPKI::Client::UI::Result');
+
+        die "Package $pkg must inherit from OpenXPKI::Client::UI::Result"
+            unless $pkg->isa('OpenXPKI::Client::UI::Result');
 
         my $obj = $pkg->new(
             client => $self,
-            req => $req,
-            extra => $params,
+            req => $arg->req,
             resp => $self->resp,
         );
 
-        return ($obj, $method);
+        return ($obj, $fullmethod) if $obj->can($fullmethod);
     }
 
-    $self->logger->error("Could not find any handler class for '".ucfirst($class)."'");
+    $self->log->error(sprintf(
+        'Could not find any handler class OpenXPKI::Client::UI::%s::* containing %s()',
+        ucfirst($class),
+        $fullmethod
+    ));
     return;
 }
 
@@ -375,23 +454,23 @@ sub __get_action {
     my $self = shift;
     my $req = shift;
 
-    my $rtoken_session = $self->session()->param('rtoken') || '';
+    my $rtoken_session = $self->session->param('rtoken') || '';
     my $rtoken_request = $req->param('_rtoken') || '';
     # check XSRF token
     if ($req->param('action')) {
         if ($rtoken_request && ($rtoken_request eq $rtoken_session)) {
-            $self->logger()->debug("Valid action request - returning " . $req->param('action'));
+            $self->log->debug("Valid action request - returning " . $req->param('action'));
             return $req->param('action');
 
         # required to make the login page work when the session expires, #552
         } elsif( !$rtoken_session and ($req->param('action') =~ /^login\!/ )) {
 
-            $self->logger()->debug("Login with expired session - ignoring rtoken");
+            $self->log->debug("Login with expired session - ignoring rtoken");
             return $req->param('action');
         } else {
 
-            $self->logger()->debug("Request with invalid rtoken ($rtoken_request != $rtoken_session)!");
-            $self->resp->status->error(i18nGettext('I18N_OPENXPKI_UI_REQUEST_TOKEN_NOT_VALID'));
+            $self->log->debug("Request with invalid rtoken ($rtoken_request != $rtoken_session)!");
+            $self->resp->status->error('I18N_OPENXPKI_UI_REQUEST_TOKEN_NOT_VALID');
         }
     }
     return '';
@@ -407,7 +486,7 @@ sub __jwt_signature {
 
     return unless($self->has_auth());
 
-    $self->logger()->debug('Sign data using key id ' . $jws->{keyid} );
+    $self->log->debug('Sign data using key id ' . $jws->{keyid} );
     my $pkey = $self->_auth();
     return encode_jwt(payload => {
         param => $data,
@@ -428,33 +507,32 @@ sub handle_page {
     my $page = (defined $args->{page} ? $args->{page} : $req->param('page')) || 'home';
     my @page_method_args;
 
-    $self->logger()->trace('Handle page: ' . Dumper { map { $_ => $args->{$_} } grep { $_ ne 'req' } keys %$args } ) if $self->logger->is_trace;
+    $self->log->trace('Handle page: ' . Dumper { map { $_ => $args->{$_} } grep { $_ ne 'req' } keys %$args } ) if $self->log->is_trace;
 
-    my $obj;
+    my $result;
     my $redirected_from;
     if ($action) {
-        $self->logger()->info('handle action ' . $action);
+        $self->log->info('handle action ' . $action);
 
         my $method;
-        ($obj, $method) = $self->__load_class($action, $req, 1);
+        ($result, $method) = $self->__load_class(call => $action, req => $req, is_action => 1);
 
-        if ($obj) {
-            $method  = "action_$method";
-            $self->logger->debug("Calling method: $method()");
-            $obj->$method();
+        if ($result) {
+            $self->log->debug("Calling method: $method()");
+            $result->$method();
             # Follow an internal redirect to an init_* method
-            if (my $target = $obj->internal_redirect_target) {
+            if (my $target = $result->internal_redirect_target) {
                 ($page, @page_method_args) = @$target;
-                $redirected_from = $obj;
-                $self->logger->trace("Internal redirect to: $page") if $self->logger->is_trace;
+                $redirected_from = $result;
+                $self->log->trace("Internal redirect to: $page") if $self->log->is_trace;
             }
         } else {
-            $self->resp->status->error(i18nGettext('I18N_OPENXPKI_UI_ACTION_NOT_FOUND'));
+            $self->resp->status->error('I18N_OPENXPKI_UI_ACTION_NOT_FOUND');
         }
     }
 
     # Render a page only if there is no action or object instantiation failed
-    if (not $obj or $redirected_from) {
+    if (not $result or $redirected_from) {
 
         # Handling of special page requests - to be replaced by hash if it grows
         if ($page eq 'welcome') {
@@ -463,30 +541,27 @@ sub handle_page {
 
         my $method;
         if ($page) {
-            ($obj, $method) = $self->__load_class($page, $req);
+            ($result, $method) = $self->__load_class(call => $page, req => $req);
         }
 
-        if (!$obj) {
-            $self->logger()->error("Failed loading page class");
-            $obj = OpenXPKI::Client::UI::Bootstrap->new(
+        if ($result) {
+            $self->log->debug("Calling method: $method()");
+            $result->status($redirected_from->status) if $redirected_from;
+            $result->$method(@page_method_args);
+        } else {
+            $result = OpenXPKI::Client::UI::Bootstrap->new(
                 client => $self,
                 req => $req,
                 resp => $self->resp,
             );
-            $obj->init_error();
-            $obj->status->error(i18nGettext('I18N_OPENXPKI_UI_PAGE_NOT_FOUND'));
-
-        } else {
-            $method  = "init_$method";
-            $self->logger->debug("Calling method: $method()");
-            $obj->status($redirected_from->status) if $redirected_from;
-            $obj->$method(@page_method_args);
+            $result->init_error();
+            $result->status->error('I18N_OPENXPKI_UI_PAGE_NOT_FOUND');
         }
     }
 
     Log::Log4perl::MDC->put('wfid', undef);
 
-    return $obj->render();
+    return $result;
 
 }
 
@@ -503,7 +578,7 @@ sub handle_login {
 
     my $status = $reply->{SERVICE_MSG};
 
-    my $result = OpenXPKI::Client::UI::Login->new(
+    my $uilogin = OpenXPKI::Client::UI::Login->new(
         client => $self,
         req => $req,
         resp => $self->resp,
@@ -516,105 +591,164 @@ sub handle_login {
 
     # this is the incoming logout action
     if ($page eq 'logout') {
-        $result->redirect->to('login!logout');
-        return $result->render;
+        $uilogin->redirect->to('login!logout');
+        return $uilogin;
     }
 
     # this is the redirect to the "you have been logged out page"
     if ($page eq 'login!logout') {
-        $result->init_logout;
-        return $result->render;
+        $uilogin->init_logout;
+        return $uilogin;
     }
 
     # action is only valid within a post request
     my $action = $self->__get_action($req);
 
-    $self->logger->info('not logged in - doing auth - page is '.$page.' - action is ' . $action);
+    $self->log->info("Not logged in. Doing auth. page = '$page', action = '$action'");
 
     # Special handling for pki_realm and stack params
     if ($action eq 'login!realm' && $req->param('pki_realm')) {
-        $session->param('pki_realm', scalar $req->param('pki_realm'));
-        $session->param('auth_stack', undef);
-        $self->logger()->debug('set realm in session: ' . $req->param('pki_realm') );
+        $self->session->param('pki_realm', scalar $req->param('pki_realm'));
+        $self->session->param('auth_stack', undef);
+        $self->log->debug('set realm in session: ' . $req->param('pki_realm') );
     }
     if($action eq 'login!stack' && $req->param('auth_stack')) {
-        $session->param('auth_stack', scalar $req->param('auth_stack'));
-        $self->logger()->debug('set auth_stack in session: ' . $req->param('auth_stack') );
+        $self->session->param('auth_stack', scalar $req->param('auth_stack'));
+        $self->log->debug('set auth_stack in session: ' . $req->param('auth_stack') );
     }
 
     # ENV always overrides session, keep this after the above block to prevent
     # people from hacking into the session parameters
     if ($ENV{OPENXPKI_PKI_REALM}) {
-        $session->param('pki_realm', $ENV{OPENXPKI_PKI_REALM});
+        $self->session->param('pki_realm', $ENV{OPENXPKI_PKI_REALM});
     }
     if ($ENV{OPENXPKI_AUTH_STACK}) {
-        $session->param('auth_stack', $ENV{OPENXPKI_AUTH_STACK});
+        $self->session->param('auth_stack', $ENV{OPENXPKI_AUTH_STACK});
     }
 
-    my $pki_realm = $session->param('pki_realm') || '';
-    my $auth_stack =  $session->param('auth_stack') || '';
+    my $pki_realm = $self->session->param('pki_realm') || '';
+    my $auth_stack =  $self->session->param('auth_stack') || '';
 
     # if this is an initial request, force redirect to the login page
     # will do an external redirect in case loginurl is set in config
     if ($action !~ /^login/ && $page !~ /^login/) {
         # Requests to pages can be redirected after login, store page in session
         if ($page && $page ne 'logout' && $page ne 'welcome') {
-            $self->logger()->debug("Store page request for later redirect " . $page);
-            $self->session()->param('redirect', $page);
+            $self->log->debug("Store page request for later redirect " . $page);
+            $self->session->param('redirect', $page);
         }
 
         # Link to an internal method using the class!method
-        if (my $loginpage = $self->_config()->{loginpage}) {
+        if (my $loginpage = $self->login_page) {
 
             # internal call to handle_page
             return $self->handle_page({ page => $loginpage, req => $req });
 
-        } elsif (my $loginurl = $self->_config()->{loginurl}) {
+        } elsif (my $loginurl = $self->login_url) {
 
-            $self->logger()->debug("Redirect to external login page " . $loginurl );
-            $result->redirect->external($loginurl);
-            return $result->render();
-            # Do a real exit to skip the error handling of the script body
-            exit;
+            $self->log->debug("Redirect to external login page " . $loginurl );
+            $uilogin->redirect->external($loginurl);
+            return $uilogin;
 
         } elsif ( $cgi->http('HTTP_X-OPENXPKI-Client') ) {
 
             # Session is gone but we are still in the ember application
-            $result->redirect->to('login');
+            $uilogin->redirect->to('login');
 
         } else {
 
             # This is not an ember request so we need to redirect
             # back to the ember page - try if the session has a baseurl
-            my $url = $self->session()->param('baseurl');
+            my $url = $self->session->param('baseurl');
             # if not, get the path from the referer
-            if (!$url && ($ENV{HTTP_REFERER} =~ m{https?://[^/]+(/[\w/]*[\w])/?}i)) {
+            if (!$url && (($ENV{HTTP_REFERER}//'') =~ m{https?://[^/]+(/[\w/]*[\w])/?}i)) {
                 $url = $1;
-                $self->logger()->debug('Restore redirect from referer');
+                $self->log->debug('Restore redirect from referer');
             }
             $url .= '/#/openxpki/login';
-            $self->logger()->debug('Redirect to login page: ' . $url);
-            $result->redirect->to($url);
+            $self->log->debug('Redirect to login page: ' . $url);
+            $uilogin->redirect->to($url);
         }
     }
 
     if ( $status eq 'GET_PKI_REALM' ) {
+        $self->log->debug("Status: '$status'");
+        # realm set
         if ($pki_realm) {
             $reply = $self->backend()->send_receive_service_msg( 'GET_PKI_REALM', { PKI_REALM => $pki_realm, } );
             $status = $reply->{SERVICE_MSG};
-            $self->logger()->debug("Selected realm $pki_realm, new status " . $status);
+            $self->log->debug("Selected realm: '$pki_realm', new status: '$status'");
+        # no realm set
         } else {
-            my $realms = $reply->{'PARAMS'}->{'PKI_REALMS'};
-            my @realm_list = map { $_ = {'value' => $realms->{$_}->{NAME}, 'label' => i18nGettext($realms->{$_}->{DESCRIPTION})} } keys %{$realms};
-            $self->logger()->trace("Offering realms: " . Dumper \@realm_list ) if $self->logger->is_trace;
-            return $result->init_realm_select( \@realm_list  )->render();
+            my $realms = $reply->{PARAMS}->{PKI_REALMS};
+
+            my $safe_realm_str = sub {
+                my $r = lc(shift);
+                $r =~ s/[_\s]/-/g;
+                $r =~ s/[^a-z0-9-]//g;
+                $r =~ s/-+/-/g;
+                "oxi-realm-card-$r"
+            };
+
+            my @cards;
+            # "path" mode: realm cards are links to defined sub paths
+            if ('path' eq $self->realm_mode) {
+                # use webui config but only take realms known to the server:
+                my @realm_list =
+                    sort { lc($realms->{$a}->{LABEL}) cmp lc($realms->{$b}->{LABEL}) }
+                    grep { $realms->{$_} }
+                    keys $self->realm_path_map->%*;
+
+                # create a link for each <realm URL path> = <realm> + <auth stack>
+                for my $realm (@realm_list) {
+                    my $auth_stacks = $realms->{$realm}->{AUTH_STACKS};
+
+                    my @defs = $self->realm_path_map->{$realm}->@*;
+                    for my $def (@defs) {
+                        my $stack = $def->{stack};
+                        my $footer = $stack
+                            ? ($auth_stacks->{$stack} ? $auth_stacks->{$stack}->{label} : $stack)
+                            : '';
+                        push @cards, {
+                            label => $realms->{$realm}->{LABEL},
+                            description => $realms->{$realm}->{DESCRIPTION},
+                            footer => $footer,
+                            image => $realms->{$realm}->{IMAGE},
+                            color => $realms->{$realm}->{COLOR},
+                            css_class => $safe_realm_str->($realm),
+                            href => $def->{url},
+                        };
+                    }
+                }
+
+            # other modes: realm cards are actions that set the "pki_realm" parameter
+            } else {
+                @cards =
+                    map { {
+                        label => $realms->{$_}->{LABEL},
+                        description => $realms->{$_}->{DESCRIPTION},
+                        image => $realms->{$_}->{IMAGE},
+                        color => $realms->{$_}->{COLOR},
+                        css_class => $safe_realm_str->($_),
+                        action => 'login!realm',
+                        action_params => {
+                            pki_realm => $realms->{$_}->{NAME},
+                        },
+                    } }
+                    sort { lc($realms->{$a}->{LABEL}) cmp lc($realms->{$b}->{LABEL}) }
+                    keys %{$realms};
+            }
+
+            $uilogin->init_realm_cards(\@cards, $self->realm_layout eq 'list' ? 1 : 0);
+            return $uilogin;
         }
     }
 
     if ( $status eq 'GET_AUTHENTICATION_STACK' ) {
+        $self->log->debug("Status: '$status'");
         # Never auth with an internal stack!
         if ( $auth_stack && $auth_stack !~ /^_/) {
-            $self->logger()->debug("Authentication stack: $auth_stack");
+            $self->log->debug("Authentication stack: $auth_stack");
             $reply = $self->backend()->send_receive_service_msg( 'GET_AUTHENTICATION_STACK', {
                AUTHENTICATION_STACK => $auth_stack
             });
@@ -626,7 +760,7 @@ sub handle_login {
             my @stack_list = map {
                 ($stacks->{$_}->{name} !~ /^_/) ? ($_ = {
                     'value' => $stacks->{$_}->{name},
-                    'label' => i18nGettext($stacks->{$_}->{label}),
+                    'label' => $stacks->{$_}->{label},
                     'description' => $stacks->{$_}->{description}
                 }) : ()
             } keys %{$stacks};
@@ -634,41 +768,43 @@ sub handle_login {
             # Directly load stack if there is only one
             if (scalar @stack_list == 1)  {
                 $auth_stack = $stack_list[0]->{value};
-                $session->param('auth_stack', $auth_stack);
-                $self->logger()->debug("Only one stack avail ($auth_stack) - autoselect");
+                $self->session->param('auth_stack', $auth_stack);
+                $self->log->debug("Only one stack avail ($auth_stack) - autoselect");
                 $reply = $self->backend()->send_receive_service_msg( 'GET_AUTHENTICATION_STACK', {
                     AUTHENTICATION_STACK => $auth_stack
                 } );
                 $status = $reply->{SERVICE_MSG};
             } else {
-                $self->logger()->trace("Offering stacks: " . Dumper \@stack_list ) if $self->logger->is_trace;
-                return $result->init_auth_stack( \@stack_list )->render();
+                $self->log->trace("Offering stacks: " . Dumper \@stack_list ) if $self->log->is_trace;
+                $uilogin->init_auth_stack(\@stack_list);
+                return $uilogin;
             }
         }
     }
 
-    $self->logger()->debug("Selected realm $pki_realm, new status " . $status);
-    $self->logger()->trace('Reply: ' . Dumper $reply) if $self->logger->is_trace;
+    $self->log->debug("Selected realm $pki_realm, new status " . $status);
+    $self->log->trace('Reply: ' . Dumper $reply) if $self->log->is_trace;
 
     # we have more than one login handler and leave it to the login
     # class to render it right.
     if ( $status =~ /GET_(.*)_LOGIN/ ) {
+        $self->log->debug("Status: '$status'");
         my $login_type = $1;
 
         ## FIXME - need a good way to configure login handlers
-        $self->logger()->info('Requested login type ' . $login_type );
+        $self->log->info('Requested login type ' . $login_type );
         my $auth = $reply->{PARAMS};
         my $jws = $reply->{SIGN};
 
         # SSO Login uses data from the ENV, so no need to render anything
         if ( $login_type eq 'CLIENT' ) {
 
-            $self->logger()->trace('ENV is ' . Dumper \%ENV) if $self->logger->is_trace;
+            $self->log->trace('ENV is ' . Dumper \%ENV) if $self->log->is_trace;
             my $data;
             if ($auth->{envkeys}) {
                 foreach my $key (keys %{$auth->{envkeys}}) {
                     my $envkey = $auth->{envkeys}->{$key};
-                    $self->logger()->debug("Try to load $key from $envkey");
+                    $self->log->debug("Try to load $key from $envkey");
                     next unless defined ($ENV{$envkey});
                     $data->{$key} = Encode::decode('UTF-8', $ENV{$envkey}, Encode::LEAVE_SRC | Encode::FB_CROAK);
                 }
@@ -680,7 +816,7 @@ sub handle_login {
 
             # at least some items were found so we send them to the backend
             if ($data) {
-                $self->logger()->trace('Sending auth data ' . Dumper $data) if $self->logger->is_trace;
+                $self->log->trace('Sending auth data ' . Dumper $data) if $self->log->is_trace;
 
                 $data = $self->__jwt_signature($data, $jws) if ($jws);
 
@@ -690,28 +826,29 @@ sub handle_login {
             } elsif (my $loginurl = $auth->{login}) {
 
                 # the login url might contain a backlink to the running instance
-                $loginurl = OpenXPKI::Template->new()->render( $loginurl,
-                    { baseurl => $session->param('baseurl') } );
+                $loginurl = OpenXPKI::Template->new->render( $loginurl,
+                    { baseurl => $self->session->param('baseurl') } );
 
-                $self->logger()->debug("No auth data in environment - redirect found $loginurl");
-                $result->redirect->external($loginurl);
-                return $result->render();
+                $self->log->debug("No auth data in environment - redirect found $loginurl");
+                $uilogin->redirect->external($loginurl);
+                return $uilogin;
 
             # bad luck - something seems to be really wrong
             } else {
-                $self->logger()->error('No ENV data to perform SSO Login');
+                $self->log->error('No ENV data to perform SSO Login');
                 $self->logout_session( $cgi );
-                return $result->init_login_missing_data()->render();
+                $uilogin->init_login_missing_data();
+                return $uilogin;
             }
 
         } elsif ( $login_type eq 'X509' ) {
             my $user = $ENV{'SSL_CLIENT_S_DN_CN'} || $ENV{'SSL_CLIENT_S_DN'};
             my $cert = $ENV{'SSL_CLIENT_CERT'} || '';
 
-            $self->logger()->trace('ENV is ' . Dumper \%ENV) if $self->logger->is_trace;
+            $self->log->trace('ENV is ' . Dumper \%ENV) if $self->log->is_trace;
 
             if ($cert) {
-                $self->logger()->info('Sending X509 Login ( '.$user.' )');
+                $self->log->info('Sending X509 Login ( '.$user.' )');
                 my @chain;
                 # larger chains are very unlikely and we dont support stupid clients
                 for (my $cc=0;$cc<=3;$cc++)   {
@@ -724,11 +861,110 @@ sub handle_login {
                 $data = $self->__jwt_signature($data, $jws) if ($jws);
 
                 $reply =  $self->backend()->send_receive_service_msg( 'GET_X509_LOGIN', $data);
-                $self->logger()->trace('Auth result ' . Dumper $reply) if $self->logger->is_trace;
+                $self->log->trace('Auth result ' . Dumper $reply) if $self->log->is_trace;
             } else {
-                $self->logger()->error('Certificate missing for X509 Login');
+                $self->log->error('Certificate missing for X509 Login');
                 $self->logout_session( $cgi );
-                return $result->init_login_missing_data()->render();
+                $uilogin->init_login_missing_data;
+                return $uilogin;
+            }
+
+        } elsif( $login_type  eq 'OIDC' ) {
+
+            my %oidc_client = map {
+                ($_ => ($auth->{$_} || die "OIDC setup incomplete, $_ is not set"));
+            } qw(client_id auth_uri token_uri client_secret);
+
+            $self->log->trace(SDumper \%oidc_client) if ($self->log->is_trace);
+
+            # we use "page" to transport the token
+            if ($page =~ m{login!oidc!token!([\w\-\.]+)\z}) {
+                # Step 3 - use token to perform authentication
+                my $token = $1;
+                $self->log->debug('OIDC Login (3/3) - present token to backend');
+                $self->log->trace($token);
+                my $nonce = $self->session->param('oidc-nonce');
+                return $uilogin->init_login_missing_data unless ($nonce);
+
+                $self->session->param('oidc-nonce' => undef);
+                $reply = $self->backend()->send_receive_service_msg( 'GET_OIDC_LOGIN', {
+                    token => $token,
+                    client_id => $oidc_client{client_id},
+                    nonce => $nonce,
+                });
+
+            } else {
+
+                my $tt = OpenXPKI::Template->new;
+                my $uri_pattern = $auth->{redirect_uri} || 'https://[% host _ baseurl %]';
+                my $redirect_uri = $tt->render( $uri_pattern, {
+                    host => $ENV{HTTP_HOST},
+                    baseurl => $self->session->param('baseurl'),
+                    realm =>   $pki_realm,
+                    stack =>   $auth_stack,
+                });
+
+                if (my $code = $req->param('code')) {
+
+                    # Step 2 - user was redirected from IdP
+                    $self->log->debug("OIDC Login (2/3) - redeem auth code $code");
+                    my $ua = LWP::UserAgent->new();
+                    # For whatever reason this must be www-form encoded and not JSON
+                    my $response = $ua->post( $oidc_client{token_uri}, [
+                        code => $code,
+                        client_id => $oidc_client{client_id},
+                        client_secret => $oidc_client{client_secret},
+                        redirect_uri => $redirect_uri.'/oidc_redirect',
+                        grant_type => 'authorization_code',
+                    ]);
+                    $self->log->trace("OIDC Token Response: " .$response->decoded_content);
+                    if (!$response->is_success) {
+                        $self->log->warn("Unable to redeem token, error was: " . $response->decoded_content);
+                        $uilogin->status->error('Unable to redeem token');
+                        $uilogin->redirect->to('login!missing_data');
+                        return $uilogin;
+                    }
+                    my $auth_info = decode_json($response->decoded_content);
+                    $uilogin->redirect->to('login!oidc!token!'.$auth_info->{id_token});
+                    return $uilogin;
+
+                } elsif ($self->session->param('oidc-nonce')) {
+
+                    # to avoid an endless loop in case the user is not willing
+                    # or able to complete the OIDC login, we use the nonce
+                    # in the session to detect a "returning user" and render an
+                    # info page instead of doing a redirect
+                    $self->logout_session( $cgi );
+                    return $uilogin->init_login_missing_data;
+
+                } else {
+
+                    # Initial step - assemble auth token request and send redirect
+                    my $nonce = Data::UUID->new()->create_b64();
+                    my $sess_id = $self->has_cipher ?
+                        encode_base64($self->cipher->encrypt($self->session->id)) :
+                        $self->session->id;
+
+                    # TODO - this is only set if we had a roundtrip before
+                    # move this into the session
+                    my $hash_key = $cgi->cookie('oxi-extid');
+                    my $auth_token = {
+                        response_type => 'code',
+                        client_id => $oidc_client{client_id},
+                        scope => ($auth->{scope} || 'openid profile email'),
+                        redirect_uri => $redirect_uri.'/oidc_redirect',
+                        state => encode_jwt( alg => 'HS256', key => $hash_key, payload => {
+                            session_id => $sess_id,
+                            baseurl => $redirect_uri,
+                        }),
+                        nonce => $nonce,
+                    };
+                    $self->log->debug('OIDC Login (1/3) - redirect to ' . $oidc_client{auth_uri});
+                    $self->session->param('oidc-nonce',$nonce);
+                    my $loginurl = $oidc_client{auth_uri}.'?'.join('&', (map { $_ .'='. uri_escape($auth_token->{$_})  } keys %{$auth_token}));
+                    $uilogin->redirect->external($loginurl);
+                    return $uilogin;
+                }
             }
 
         } elsif( $login_type  eq 'PASSWD' ) {
@@ -736,7 +972,7 @@ sub handle_login {
             # form send / credentials are passed (works with an empty form too...)
 
             if (($self->__get_action($req)) eq 'login!password') {
-                $self->logger()->debug('Seems to be an auth try - validating');
+                $self->log->debug('Seems to be an auth try - validating');
                 ##FIXME - Input validation
 
                 my $data;
@@ -753,21 +989,22 @@ sub handle_login {
                 $data = $self->__jwt_signature($data, $jws) if ($jws);
 
                 $reply = $self->backend()->send_receive_service_msg( 'GET_PASSWD_LOGIN', $data );
-                $self->logger()->trace('Auth result ' . Dumper $reply) if $self->logger->is_trace;
+                $self->log->trace('Auth result ' . Dumper $reply) if $self->log->is_trace;
 
             } else {
-                $self->logger()->debug('No credentials, render form');
-                return $result->init_login_passwd($auth)->render();
+                $self->log->debug('No credentials, render form');
+                $uilogin->init_login_passwd($auth);
+                return $uilogin;
             }
 
         } else {
 
-            $self->logger()->warn('Unknown login type ' . $login_type );
+            $self->log->warn('Unknown login type ' . $login_type );
         }
     }
 
     if ( $reply->{SERVICE_MSG} eq 'SERVICE_READY' ) {
-        $self->logger()->info('Authentication successul - fetch session info');
+        $self->log->info('Authentication successul - fetch session info');
         # Fetch the user info from the server
         $reply = $self->backend()->send_receive_service_msg( 'COMMAND',
             { COMMAND => 'get_session_info', PARAMS => {}, API => 2 } );
@@ -779,7 +1016,7 @@ sub handle_login {
             # merge baseurl to authinfo links
             # (we need to get the baseurl before recreating the session below)
             my $auth_info = {};
-            my $baseurl = $session->param('baseurl');
+            my $baseurl = $self->session->param('baseurl');
             if (my $ai = $session_info->{authinfo}) {
                 my $tt = OpenXPKI::Template->new;
                 for my $key (keys %{$ai}) {
@@ -795,93 +1032,100 @@ sub handle_login {
             # The backend session remains the same but can not be used by an
             # adversary as the id is never exposed and we destroy the old frontend
             # session so access to the old session is not possible
-            $self->_recreate_frontend_session($session, $session_info, $auth_info);
-
-            Log::Log4perl::MDC->put('sid', substr($session->id,0,4));
-
-            $self->resp->session_cookie->id($session->id);
+            $self->_recreate_frontend_session($session_info, $auth_info);
 
             if ($auth_info->{login}) {
-                $result->redirect->to($auth_info->{login});
+                $uilogin->redirect->to($auth_info->{login});
             } else {
-                $result->init_index();
+                $uilogin->init_index();
             }
-            return $result->render();
+            return $uilogin;
         }
     }
 
     if ( $reply->{SERVICE_MSG} eq 'ERROR') {
 
-        $self->logger()->trace('Server Error Msg: '. Dumper $reply) if $self->logger->is_trace;
+        $self->log->trace('Server Error Msg: '. Dumper $reply) if $self->log->is_trace;
 
         # Failure here is likely a wrong password
 
         if ($reply->{'ERROR'} && $reply->{'ERROR'}->{CLASS} eq 'OpenXPKI::Exception::Authentication') {
-            $result->status->error(i18nGettext( $reply->{'ERROR'}->{LABEL} ));
+            $uilogin->status->error($reply->{'ERROR'}->{LABEL});
         } else {
-            $result->set_status_from_error_reply($reply);
+            $uilogin->set_status_from_error_reply($reply);
         }
-        return $result->render();
+        return $uilogin;
     }
 
-    $self->logger()->debug("unhandled error during auth");
+    $self->log->debug("unhandled error during auth");
     return;
 
 }
 
-sub _recreate_frontend_session() {
+sub _new_frontend_session {
 
     my $self = shift;
-    my $session = shift;
+
+    # delete the old instance data
+    $self->session->delete;
+    $self->session->flush;
+
+    # call new() on the existing session object to reuse settings
+    $self->session->new;
+
+    Log::Log4perl::MDC->put('sid', substr($self->session->id,0,4));
+    $self->log->debug('New frontend session: ID = '. $self->session->id);
+
+}
+
+sub _recreate_frontend_session {
+
+    my $self = shift;
     my $data = shift;
     my $auth_info = shift;
 
-    $self->logger->trace('Got session info: '. Dumper $data) if $self->logger->is_trace;
+    $self->log->trace('Got session info: '. Dumper $data) if $self->log->is_trace;
 
     # fetch redirect from old session before deleting it!
-    my $redirect = $session->param('redirect');
+    my %keep = map {
+        my $val = $self->session->param($_);
+        (defined $val) ? ($_ => $val) : ();
+    } ('redirect','baseurl');
 
-    # delete the old instance data
-    $session->delete;
-    $session->flush;
-    # call new on the existing session object to reuse settings
-    $session = $session->new;
+    $self->log->trace("Carry over session items: " . Dumper \%keep) if ($self->log->is_trace);
 
-    $self->logger->debug('New frontend session id : '. $session->id );
+    # create a new session
+    $self->_new_frontend_session;
 
-    if ($redirect) {
-        $self->logger->trace('Carry over redirect target ' . $redirect);
-        $session->param('redirect', $redirect);
-    }
+    map { $self->session->param($_, $keep{$_}) } keys %keep;
 
     # set some data
-    $session->param('backend_session_id', $self->backend->get_session_id );
+    $self->session->param('backend_session_id', $self->backend->get_session_id );
 
     # move userinfo to own node
-    $session->param('userinfo', $data->{userinfo} || {});
+    $self->session->param('userinfo', $data->{userinfo} || {});
     delete $data->{userinfo};
 
-    $session->param('authinfo', $auth_info);
+    $self->session->param('authinfo', $auth_info);
 
-    $session->param('user', $data);
-    $session->param('pki_realm', $data->{pki_realm});
-    $session->param('is_logged_in', 1);
-    $session->param('initialized', 1);
-
-    $self->session($session);
+    $self->session->param('user', $data);
+    $self->session->param('pki_realm', $data->{pki_realm});
+    $self->session->param('is_logged_in', 1);
+    $self->session->param('initialized', 1);
+    $self->session->param('login_timestamp', time);
 
     # Check for MOTD
     my $motd = $self->backend->send_receive_command_msg( 'get_motd' );
     if (ref $motd->{PARAMS} eq 'HASH') {
-        $self->logger->trace('Got MOTD: '. Dumper $motd->{PARAMS} ) if $self->logger->is_trace;
-        $session->param('motd', $motd->{PARAMS} );
+        $self->log->trace('Got MOTD: '. Dumper $motd->{PARAMS} ) if $self->log->is_trace;
+        $self->session->param('motd', $motd->{PARAMS} );
     }
 
     # menu
     my $reply = $self->backend->send_receive_command_msg( 'get_menu' );
-    $self->_set_menu($session, $reply->{PARAMS}) if $reply->{PARAMS};
+    $self->_set_menu($self->session, $reply->{PARAMS}) if $reply->{PARAMS};
 
-    $session->flush;
+    $self->session->flush;
 
 }
 
@@ -890,13 +1134,13 @@ sub _set_menu {
     my $session = shift;
     my $menu = shift;
 
-    $self->logger->trace('Menu ' . Dumper $menu) if $self->logger->is_trace;
+    $self->log->trace('Menu ' . Dumper $menu) if $self->log->is_trace;
 
     $session->param('menu_items', $menu->{main} || []);
 
     # persist the optional parts of the menu hash (landmark, tasklist, search attribs)
     $session->param('landmark', $menu->{landmark} || {});
-    $self->logger->trace('Got landmarks: ' . Dumper $menu->{landmark}) if $self->logger->is_trace;
+    $self->log->trace('Got landmarks: ' . Dumper $menu->{landmark}) if $self->log->is_trace;
 
     # Keepalive pings to endpoint
     if ($menu->{ping}) {
@@ -925,7 +1169,7 @@ sub _set_menu {
         } else {
             $session->param($key, { 'default' => [] });
         }
-        $self->logger->trace("Got $key: " . Dumper $menu->{$key}) if $self->logger->is_trace;
+        $self->log->trace("Got $key: " . Dumper $menu->{$key}) if $self->log->is_trace;
     }
 
     # top level is a hash that must have a "attributes" node
@@ -939,9 +1183,19 @@ sub _set_menu {
         } elsif (ref $menu->{$key} eq 'HASH') {
             $session->param($key, $menu->{$key} );
         } else {
-            $session->param($key, { 'default' => {} });
+            # empty hash is used to disable the search page
+            $session->param($key, {} );
         }
-        $self->logger->trace("Got $key: " . Dumper $menu->{$key}) if $self->logger->is_trace;
+        $self->log->trace("Got $key: " . Dumper $menu->{$key}) if $self->log->is_trace;
+    }
+
+    foreach my $key (qw(datapool)) {
+        if (ref $menu->{$key} eq 'HASH' and $menu->{$key}->{default}) {
+            $session->param($key, $menu->{$key} );
+        } else {
+            $session->param($key, { default => {} });
+        }
+        $self->log->trace("Got $key: " . Dumper $menu->{$key}) if $self->log->is_trace;
     }
 
     # Check syntax of "certdetails".
@@ -949,25 +1203,25 @@ sub _set_menu {
     my $certdetails = sub {
         my $result;
         unless ($result = $menu->{certdetails}) {
-            $self->logger->warn('Config entry "certdetails" is empty');
+            $self->log->warn('Config entry "certdetails" is empty');
             return {};
         }
         unless (ref $result eq 'HASH') {
-            $self->logger->warn('Config entry "certdetails" is not a hash');
+            $self->log->warn('Config entry "certdetails" is not a hash');
             return {};
         }
         if ($result->{metadata}) {
             if (ref $result->{metadata} eq 'ARRAY') {
                 for my $md (@{ $result->{metadata} }) {
                     if (not ref $md eq 'HASH') {
-                        $self->logger->warn('Config entry "certdetails.metadata" contains an item that is not a hash');
+                        $self->log->warn('Config entry "certdetails.metadata" contains an item that is not a hash');
                         $result->{metadata} = [];
                         last;
                     }
                 }
             }
             else {
-                $self->logger->warn('Config entry "certdetails.metadata" is not an array');
+                $self->log->warn('Config entry "certdetails.metadata" is not an array');
                 $result->{metadata} = [];
             }
         }
@@ -979,16 +1233,16 @@ sub _set_menu {
     # (the sub{} below allows using "return" instead of nested "if"-structures)
     my $wfdetails = sub {
         if (not exists $menu->{wfdetails}) {
-            $self->logger->debug('Config entry "wfdetails" is not defined, using defaults');
+            $self->log->debug('Config entry "wfdetails" is not defined, using defaults');
             return [];
         }
         my $result;
         unless ($result = $menu->{wfdetails}) {
-            $self->logger->debug('Config entry "wfdetails" is set to "undef", hide from output');
+            $self->log->debug('Config entry "wfdetails" is set to "undef", hide from output');
             return;
         }
         unless (ref $result eq 'ARRAY') {
-            $self->logger->warn('Config entry "wfdetails" is not an array');
+            $self->log->warn('Config entry "wfdetails" is not an array');
             return [];
         }
         return $result;
@@ -1010,18 +1264,11 @@ sub logout_session {
     my $self = shift;
     my $cgi = shift;
 
-    $self->logger->info("session logout");
-
-    my $session = $self->session;
+    $self->log->info("session logout");
     $self->backend->logout;
-    $self->session->delete;
-    $self->session->flush;
-    $self->session($self->session->new);
 
-    Log::Log4perl::MDC->put('sid', substr($self->session->id,0,4));
-
-    # flush the session cookie
-    $self->resp->session_cookie->id($self->session->id);
+    # create a new session
+    $self->_new_frontend_session;
 
 }
 

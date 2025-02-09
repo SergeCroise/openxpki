@@ -2,21 +2,27 @@ package OpenXPKI::Server::Authentication;
 
 use strict;
 use warnings;
-use utf8;
-
 use English;
-use OpenXPKI::Debug;
+
+# Core modules
 use Data::Dumper;
-use Crypt::JWT qw(decode_jwt);
 use Digest::SHA qw(sha1);
 use MIME::Base64 qw(encode_base64url decode_base64);
+use Module::Load ();
+
+# CPAN modules
+use Crypt::JWT qw(decode_jwt);
+
+# Project modules
+use OpenXPKI::Debug;
 use OpenXPKI::Exception;
 use OpenXPKI::Server::Context qw( CTX );
-
 use OpenXPKI::Server::Authentication::Handle;
+use OpenXPKI::Server::Authentication::Base; # preload to get debug working
 
-# preload to get debug working
-use  OpenXPKI::Server::Authentication::Base;
+# Feature::Compat::Try should be done last to safely disable warnings
+use Feature::Compat::Try;
+
 ## constructor and destructor stuff
 
 sub new {
@@ -73,6 +79,7 @@ sub __load_pki_realm
 
     # Fake Session for Config!
     CTX('session')->data->pki_realm( $realm );
+    Log::Log4perl::MDC->put('pki_realm', $realm);
 
     my %handlers;
 
@@ -119,6 +126,8 @@ sub __load_pki_realm
     ##! 64: "Realm auth config " . Dumper $self->{PKI_REALM}->{$realm}
 
     CTX('session')->data->pki_realm( $restore_realm ) if $restore_realm;
+    Log::Log4perl::MDC->put('pki_realm', $restore_realm);
+
     ##! 4: "end"
     return 1;
 }
@@ -145,7 +154,7 @@ sub __load_handler
     ##! 8: "name ::= $handler"
     ##! 8: "type ::= $type"
     my $class = "OpenXPKI::Server::Authentication::$type";
-    eval "use $class;1";
+    eval { Module::Load::load($class) };
     if ($EVAL_ERROR) {
         OpenXPKI::Exception->throw (
             message => "Unable to load authentication handler class $type",
@@ -160,6 +169,8 @@ sub __load_handler
     return 1;
 }
 
+# Fills $self->{PKI_REALM}->{$realm}->{TENANT} in OpenXPKI Enterprise Edition.
+# Does nothing in Community Edition.
 sub __load_tenant {
 
     ##! 4: "start"
@@ -171,11 +182,23 @@ sub __load_tenant {
 
     my $conf = $config->get_hash(['auth', 'roles', $role, 'tenant']);
 
-    return unless ($conf);
+    return unless $conf;
 
     # always add the null handler if it does not exist
     if (!$self->{PKI_REALM}->{$realm}->{TENANT}->{_default}) {
-        eval "use OpenXPKI::Server::AccessControl::Tenant::Null;1";
+        try {
+            # this is EE code
+            require OpenXPKI::Server::AccessControl::Tenant::Null;
+        }
+        catch ($err) {
+            # fail silently on "module not found" but loudly on any other error
+            if ($err =~ m{locate OpenXPKI/Server/AccessControl/Tenant/Null\.pm in \@INC}) {
+                CTX('log')->system->warn("Ignoring tenant configuration: tenants are a feature of OpenXPKI Enterprise Edition");
+                return;
+            } else {
+                die $err;
+            }
+        }
         $self->{PKI_REALM}->{$realm}->{TENANT}->{_default} = OpenXPKI::Server::AccessControl::Tenant::Null->new();
         CTX('log')->auth()->info('Loaded tenant null handler');
     }
@@ -197,7 +220,7 @@ sub __load_tenant {
         );
     }
     ##! 32: $class
-    eval "use $class;1";
+    eval { Module::Load::load($class) };
     if ($EVAL_ERROR) {
         OpenXPKI::Exception->throw (
             message => "Unable to load access control handler class $class",
@@ -219,11 +242,18 @@ sub __load_tenant {
 
 sub list_authentication_stacks {
     my $self = shift;
-
     ##! 1: "start"
 
     ##! 2: "get PKI realm"
     my $realm = CTX('session')->data->pki_realm;
+    return $self->list_authentication_stacks_of($realm);
+}
+
+sub list_authentication_stacks_of {
+    my $self = shift;
+    my $realm = shift;
+    ##! 1: "start"
+
     my %ret = map {
         my %vv = %{$self->{PKI_REALM}->{$realm}->{STACK}->{$_}};
         delete $vv{handler};

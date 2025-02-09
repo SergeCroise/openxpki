@@ -7,72 +7,6 @@ OpenXPKI::Server::Bedroom - Helper module to... err... make child processes
 
 =head1 DESCRIPTION
 
-=head2 Note on SIGCHLD
-
-The requirements for a proper C<SIGCHLD> handling are:
-
-=over
-
-=item * avoid zombie processes of our forked children by calling C<waitpid()>
-on them,
-
-=item * allow follow up code to evaluate the status of e.g. C<sytem()> calls
-or doing own C<waitpid()> on children not forked by C<OpenXPKI::Server::Bedroom>,
-
-=item * avoid interfering with L<Net::Server>'s C<SIGCHLD> handler,
-
-=item * keep the C<OpenXPKI::Server::Bedroom> instance that contains the C<SIGCHLD>
-handler alive as long as there are child processes. Destroying the instance
-too early could lead to errors: without resetting C<SIGCHLD> handler to
-C<'IGNORE'> a finished child process would raise the error
-I<"Signal SIGCHLD received, but no signal handler set">. When set to C<'IGNORE'>
-e.g. a following C<system()> call from code higher up the hierarchy would fail.
-
-=back
-
-The most compatible way to handle C<SIGCHLD> is to set it to C<'DEFAULT'>,
-letting Perl handle it. This way commands like C<system()> will work properly.
-
-But for the C<OpenXPKI::Server::Bedroom> parent process to be able to reap its child
-processes we need a custom C<SIGCHLD> handler to call C<waitpid()> on them.
-So in our custom handler we keep track of the PIDs of our own forked children
-and only reap those. Other children (e.g. forked via C<system()>) are left
-untouched.
-
-Thus there are two usage modes:
-
-=over
-
-=item 1. Default (C<keep_parent_sigchld =E<gt> 0>):
-
-Parent: install custom C<SIGCHLD> handler (NOT compatible with C<Net::Server>
-parent process, reaps children forked by us, C<system()> compatible)
-
-Child: inherit parent's custom handler
-
-=item 2. C<keep_parent_sigchld =E<gt> 1> (for use in C<Net::Server> parent
-process):
-
-Parent: do not touch C<SIGCHLD> handler (to keep C<Net::Server>'s handler,
-reaps children forked by us via existing handler, NOT C<system()> compatible)
-
-Child: set C<$SIG{'CHLD'} = 'DEFAULT'>.
-
-=back
-
-If this object is destroyed while the C<$SIG{'CHLD'}> still refers to our
-handler then children exiting later on will raise the internal Perl error
-I<"Signal SIGCHLD received, but no signal handler set.">
-
-That is why in L</DEMOLISH> we explicitely hand over child reaping to the
-operating system. But this also means after this the process will not be
-able to call C<system()> and the like anymore. So a better solution is to
-keep this object alive as long as possible, ideally until C<OpenXPKI::Server>
-shuts down.
-
-Also see L<https://github.com/Perl/perl5/issues/17662>, might be related.
-
-Also see L<https://perldoc.perl.org/perlipc#Signals>.
 
 =cut
 
@@ -82,11 +16,16 @@ use English;
 # CPAN modules
 use POSIX ();
 use IO::Handle;
+use Log::Log4perl;
+use Type::Params qw( signature_for );
 
 # Project modules
 use OpenXPKI::Debug;
 use OpenXPKI::Exception;
-use OpenXPKI::MooseParams;
+use OpenXPKI::Server::Context qw( CTX );
+
+# should be done after imports to safely disable warnings in Perl < 5.36
+use experimental 'signatures';
 
 #
 has old_sig_set => (
@@ -163,35 +102,121 @@ B<Parameters>
 
 =item * C<gid> I<Int> - optional: group ID to set for the newly forked child process. Default: do not change ID.
 
-=item * C<keep_parent_sigchld> I<Bool> - optional: C<1> = parent: keep currently installed C<SIGCHLD> handler,
-child: set C<SIGCHLD> to C<default>. Default: 0
+=item * C<keep_parent_sigchld> I<Bool> - optional:
+
+=over
+
+=item * C<0> (default) - parent: install our custom C<SIGCHLD> handler (see L</Note on SIGCHLD>); child: also use custom handler.
+
+=item * C<1> - parent: keep currently installed C<SIGCHLD> handler; child: set default C<SIGCHLD> handler to make C<system()> etc. work.
+
+=back
 
 =item * C<capture_stdout> I<Bool> - optional: C<1> = redirect child process I<STDOUT> to a filehandle that can be queried using L</get_stdout_fh>. Default: 0
 
 =back
 
+=head2 Note on SIGCHLD
+
+The requirements for a proper C<SIGCHLD> handling are:
+
+=over
+
+=item * avoid zombie processes of our forked children by calling C<waitpid()>
+on them,
+
+=item * allow follow up code to evaluate the status of e.g. C<sytem()> calls
+or doing own C<waitpid()> on children that were not forked by us,
+
+=item * avoid interfering with L<Net::Server>'s C<SIGCHLD> handler,
+
+=item * keep the C<OpenXPKI::Server::Bedroom> instance that contains the
+C<SIGCHLD> handler alive as long as there are child processes. Destroying the
+instance too early could lead to errors: without resetting C<SIGCHLD> handler
+to C<'IGNORE'> a finished child process would raise the error
+I<"Signal SIGCHLD received, but no signal handler set">. When set to
+C<'IGNORE'> too early a following call to e.g. C<system()> from code higher up
+the hierarchy would fail.
+
+=back
+
+The most compatible way to handle C<SIGCHLD> is to set it to C<'DEFAULT'>,
+letting Perl handle it. This way commands like C<system()> will work properly.
+
+But for the C<OpenXPKI::Server::Bedroom> parent process to be able to reap its child
+processes we need a custom C<SIGCHLD> handler to call C<waitpid()> on them.
+So in our custom handler we keep track of the PIDs of our own forked children
+and only reap those. Other children (e.g. forked via C<system()>) are left
+untouched.
+
+Thus there are two usage modes for C<new_child>:
+
+=over
+
+=item 1. Default (C<keep_parent_sigchld =E<gt> 0>):
+
+Parent: install custom C<SIGCHLD> handler (NOT compatible with C<Net::Server>
+parent process, reaps children forked by us, C<system()> compatible)
+
+Child: inherit parent's custom handler
+
+=item 2. C<keep_parent_sigchld =E<gt> 1> (for use in C<Net::Server> parent
+process):
+
+Parent: do not touch C<SIGCHLD> handler (to keep C<Net::Server>'s handler,
+reaps children forked by us via existing handler, NOT C<system()> compatible)
+
+Child: set C<$SIG{'CHLD'} = 'DEFAULT'>.
+
+=back
+
+If this object is destroyed while the C<$SIG{'CHLD'}> still refers to our
+handler then children exiting later on will raise the internal Perl error
+I<"Signal SIGCHLD received, but no signal handler set.">
+
+That is why in L</DEMOLISH> we explicitely hand over child reaping to the
+operating system. But this also means after this the process will not be
+able to call C<system()> and the like anymore. So a better solution is to
+keep this object alive as long as possible, ideally until C<OpenXPKI::Server>
+shuts down.
+
+Also see L<https://github.com/Perl/perl5/issues/17662>, might be related.
+
+Also see L<https://perldoc.perl.org/perlipc#Signals>.
+
 =cut
-
-sub new_child {
-    my ($self, %args) = named_args(\@_,   # OpenXPKI::MooseParams
-        max_fork_redo => { isa => 'Int', optional => 1,default => 5 },
-        sighup_handler => { isa => 'CodeRef', optional => 1 },
-        sigterm_handler => { isa => 'CodeRef', optional => 1 },
-        uid => { isa => 'Int', optional => 1 },
-        gid => { isa => 'Int', optional => 1 },
-        keep_parent_sigchld => { isa => 'Bool', optional => 1, default => 0 },
-        capture_stdout => { isa => 'Bool', optional => 1, default => 0 },
-    );
-
+signature_for new_child => (
+    method => 1,
+    named => [
+        max_fork_redo       => 'Optional[ Int ]', { default => 5 },
+        sighup_handler      => 'Optional[ CodeRef ]',
+        sigterm_handler     => 'Optional[ CodeRef ]',
+        uid                 => 'Optional[ Int ]',
+        gid                 => 'Optional[ Int ]',
+        keep_parent_sigchld => 'Optional[ Bool ]', { default => 0 },
+        capture_stdout      => 'Optional[ Bool ]', { default => 0 },
+    ],
+);
+sub new_child ($self, $arg) {
     ##! 1: 'start - $SIG{"CHLD"}: ' . ($SIG{'CHLD'}//'<undef>')
 
     # Reap child processes while allowing e.g. system() to work properly.
-    $SIG{'CHLD'} = \&_catch_them_all if not $args{keep_parent_sigchld};
+    $SIG{'CHLD'} = \&_catch_them_all unless $arg->keep_parent_sigchld;
 
     ##! 1: 'start - $SIG{"CHLD"}: ' . ($SIG{'CHLD'}//'<undef>')
 
+    # Disconnect database before forking esp. to fix warnings when
+    # using DBD::MariaDB (DBI occasionally warns: "DBI active kids (-1) < 0").
+    # DBIx::Handler sets (Auto)InactiveDestroy which should prevent such
+    # problems but DBD::MariaDB does not seem to properly handle it.
+    # Also see https://github.com/perl5-dbi/DBD-MariaDB/pull/175.
+    # This workaround should not cause problems because DBIx::Handler does a
+    # reconnect if neccessary.
+    eval { CTX('dbi')->disconnect if OpenXPKI::Server::Context::hascontext('dbi') };
+    eval { CTX('dbi_log')->disconnect if OpenXPKI::Server::Context::hascontext('dbi_log') };
+
     # FORK!
-    my ($pid, $fh_from_child)  = $self->_try_fork($args{max_fork_redo}, $args{capture_stdout});
+    my ($pid, $fh_from_child)  = $self->_try_fork($arg->max_fork_redo, $arg->capture_stdout);
 
     # parent process: return on successful fork
     if ($pid > 0) {
@@ -206,24 +231,24 @@ sub new_child {
 
     # Set DEFAULT SIGCHLD handler to allow execution of system() etc. unless
     # parent set our special handler that does the same and more.
-    $SIG{'CHLD'} = 'DEFAULT' if $args{keep_parent_sigchld};
+    $SIG{'CHLD'} = 'DEFAULT' if $arg->keep_parent_sigchld;
 
-    $SIG{'HUP'}  = $args{sighup_handler}  if $args{sighup_handler};
-    $SIG{'TERM'} = $args{sigterm_handler} if $args{sigterm_handler};
+    $SIG{'HUP'}  = $arg->sighup_handler  if $arg->sighup_handler;
+    $SIG{'TERM'} = $arg->sigterm_handler if $arg->sigterm_handler;
 
-    if ($args{gid}) {
-        POSIX::setgid($args{gid});
+    if ($arg->gid) {
+        POSIX::setgid($arg->gid);
     }
-    if ($args{uid}) {
-        POSIX::setuid($args{uid});
-        $ENV{USER} = getpwuid($args{uid});
-        $ENV{HOME} = ((getpwuid($args{uid}))[7]);
+    if ($arg->uid) {
+        POSIX::setuid($arg->uid);
+        $ENV{USER} = getpwuid($arg->uid);
+        $ENV{HOME} = ((getpwuid($arg->uid))[7]);
     }
 
     umask 0;
     chdir '/';
     open STDIN,  '<',  '/dev/null';
-    if ($args{capture_stdout}) {
+    if ($arg->capture_stdout) {
         # STDOUT is already redirected to parent's $fh_from_child
         open(STDERR, '>&', STDOUT) if -t STDERR; # only touch STDERR if it's not already redirected to a file
     }
@@ -234,6 +259,8 @@ sub new_child {
 
     # Re-seed Perl random number generator
     srand(time ^ $PROCESS_ID);
+
+    $self->_reopen_log4perl_files;
 
     return $pid;
 }
@@ -252,10 +279,11 @@ B<Parameters>
 =back
 
 =cut
-sub get_stdout_fh {
-    my ($self, $pid) = positional_args(\@_,     # OpenXPKI::MooseParams
-        { isa => 'Int' },
-    );
+signature_for get_stdout_fh => (
+    method => 1,
+    positional => [ 'Int' ],
+);
+sub get_stdout_fh ($self, $pid) {
     return $children{$pid};
 }
 
@@ -372,6 +400,19 @@ sub _try_fork {
         message => 'fork() failed due to insufficient memory, tried $max_tries times',
         log => { priority => 'fatal', facility => 'system' }
     );
+}
+
+# Reopen files in Log4perl appenders that contain the methods 'filename' and
+# 'file_switch' (Log::Log4perl::Appender::File and maybe derived classes)
+sub _reopen_log4perl_files {
+    my $appenders = Log::Log4perl->appenders;
+
+    for my $appname (keys %{ $appenders }) {
+        my $app = $appenders->{$appname}->{appender};
+        if ($app->can('filename') and $app->can('file_switch')) {
+            $app->file_switch($app->filename); # switch to same file = reopen
+        }
+    }
 }
 
 __PACKAGE__->meta->make_immutable;

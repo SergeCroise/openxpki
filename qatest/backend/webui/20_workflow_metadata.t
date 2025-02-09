@@ -15,7 +15,7 @@ use MockUI;
 #Log::Log4perl->easy_init($DEBUG);
 Log::Log4perl->easy_init($ERROR);
 
-use Test::Deep;
+use Test::Deep ':v1';
 use Test::More tests => 6;
 
 package main;
@@ -28,7 +28,7 @@ require_ok( 'OpenXPKI::Client::UI' );
 
 my $log = Log::Log4perl->get_logger();
 
-my $session = new CGI::Session(undef, undef, {Directory=>'/tmp'});
+my $session = CGI::Session->new(undef, undef, {Directory=>'/tmp'});
 my $session_id = $session->id;
 ok ($session->id, 'Session id ok');
 

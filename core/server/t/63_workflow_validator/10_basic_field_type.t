@@ -10,7 +10,7 @@ use File::Temp qw( tempfile );
 
 # CPAN modules
 use Test::More;
-use Test::Deep;
+use Test::Deep ':v1';
 use Test::Exception;
 
 #use OpenXPKI::Debug; $OpenXPKI::Debug::LEVEL{'OpenXPKI::Server::Workflow::Validator::BasicFieldType.*'} = 32;
@@ -106,14 +106,14 @@ sub validation_fails {
 }
 
 #
-# Tests - FIXME legacy
+# Tests
 #
 
 sub test_field_with($$) {
     my ($cfg, $test_cb) = @_;
 
     # default
-    my $oxitest = create_test($cfg);
+    my $oxitest = create_test($cfg); # sets $WF_TYPE
     $oxitest->session->data->role('User');
 
     my $cfg_str = YAML::Tiny->new(values %$cfg)->write_string();

@@ -10,7 +10,7 @@ use OpenXPKI::Debug;
 sub _evaluate {
     my $self = shift;
     CTX('log')->deprecated()->error('Please rename O::S::W::Condition::CertificateAttribute to CertificateHasAttribute');
-    $self->SUPER::_evaluate();
+    $self->SUPER::_evaluate(@_);
 }
 
 1;
@@ -21,7 +21,7 @@ __END__
 
 OpenXPKI::Server::Workflow::Condition::CertificateAttribute
 
-=head1 SYNOPSIS
+=head1 DESCRIPTION
 
 This class is deprecated and should no longer be used.
 Use OpenXPKI::Server::Workflow::Condition::CertificateB<Has>Attribute.

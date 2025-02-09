@@ -52,6 +52,45 @@ are read from the filesystem.
 Calling the notifier with C<MESSAGE=csr_created> will send out two mails.
 One to the requestor and one to the ra-officer, both are CC'ed to helpdesk.
 
+=head2 Message Composition
+
+=head3 Body
+
+The message body is read from a file. The filename is created from the
+string given to I<template> by adding the suffix I<.txt> and I<.html>
+for the text and html part of the mail. If an html part is found, the
+message is send as multipart message, if a plain part exists it is set
+as alternative text in the multipart document.
+
+If only the plain part exists, a plain text message is send.
+
+You must set I<use_html: 1> in the main configuration section to enable
+html formated mails.
+
+=head3 Subject
+
+The subject can be provided in two ways - the explicit option is by
+adding the key I<subject> to the definition holding the text for the
+subject line. The string can be a template toolkit, it is send as UTF8
+encoded string so it can contain any printable character.
+
+If a I<prefix> is defined, it is prepended to the given string, to
+suppress a global prefix in a particular message, set I<prefix: ''> in
+the local definition.
+
+If the I<subject> key is set an undef or empty value, the first line of
+the plain body (after rendering) is used as subject line, the I<prefix>
+is ignored but you can access it inside the mail body as I<[% prefix %]>.
+
+To avoid any accidential problems, the mail body must have an extra
+newline between the subject and the real body:
+
+   [% prefix %] I am the subject line
+
+   Body starts here
+   ....
+
+
 =head2 Recipients and Headers
 
 =over
@@ -221,26 +260,14 @@ sub _init_transport {
 
     if($cfg->{username}) {
         if(!$cfg->{password}) {
-          CTX('log')->log(
-              MESSAGE  => sprintf("Empty password or no password provided (for user %s)", $cfg->{username}),
-              PRIORITY => "error",
-              FACILITY => [ "system", "monitor" ]
-          );
+          CTX('log')->system->error(sprintf("Empty password or no password provided (for user %s)", $cfg->{username}));
           $transport->quit;
           return undef;
         }
-        CTX('log')->log(
-            MESSAGE  => sprintf("Authenticating to server (user %s)", $cfg->{username}),
-            PRIORITY => "debug",
-            FACILITY => [ "system", "monitor" ]
-        );
+        CTX('log')->system->debug(sprintf("Authenticating to server (user %s)", $cfg->{username}));
 
         if(!$transport->auth($cfg->{username}, $cfg->{password})) {
-          CTX('log')->log(
-              MESSAGE  => sprintf("SMTP SASL authentication failed (user: %s, error: %s)", $cfg->{username}, $transport->message),
-              PRIORITY => "error",
-              FACILITY => [ "system", "monitor" ]
-          );
+          CTX('log')->system->error(sprintf("SMTP SASL authentication failed (user: %s, error: %s)", $cfg->{username}, $transport->message));
           $transport->quit;
           return undef;
         }
@@ -275,7 +302,7 @@ sub _init_use_html {
     if ($html) {
 
         # Try to load the Mime class
-        eval "use MIME::Entity;1";
+        eval { require MIME::Entity };
         if ($EVAL_ERROR) {
             CTX('log')->system()->error("Initialization of MIME::Entity failed, falling back to plain text");
             return 0;
@@ -296,14 +323,13 @@ sub _init_smime {
         return;
     }
 
-    eval "use Crypt::SMIME;1";
+    eval { require Crypt::SMIME };
     if ($EVAL_ERROR) {
         CTX('log')->system()->fatal("Initialization of Crypt::SMIME failed!");
         OpenXPKI::Exception->throw(
             message => "Initialization of Crypt::SMIME failed!",
         );
     }
-    require Crypt::SMIME;
 
     my $smime;
     if ($cfg->{certificate_p12_file}) {
@@ -396,8 +422,8 @@ sub notify {
 
         # Look if there is info from previous notifications
         # Persisted information includes:
-        # * to: Receipient address
-        # * cc: CC-Receipient, array of address
+        # * to: Recipient address
+        # * cc: CC-Recipient, array of address
         # * prefix: subject prefix (aka Ticket-Id)
         my $pi = $token->{$handle};
         if (!defined $pi) {
@@ -413,11 +439,11 @@ sub notify {
                 ##! 32: 'Creating new prefix ' . $pi->{prefix}
             }
 
-            # Receipient
-            $pi->{to} = $self->_render_receipient( $cfg->{to}, \%vars );
+            # Recipient
+            $pi->{to} = $self->_render_recipient( $cfg->{to}, \%vars );
             ##! 32: 'Got new rcpt ' . $pi->{to}
 
-            # CC-Receipient
+            # CC-Recipient
             my @cclist;
 
             ##! 32: 'Building new cc list'
@@ -433,7 +459,7 @@ sub notify {
             } elsif (ref $cfg->{cc} eq 'ARRAY') {
                 ##! 32: 'CC from array ' . Dumper $cfg->{cc}
                 foreach my $cc (@{$cfg->{cc}}) {
-                    my $rcpt = $self->_render_receipient( $cc, \%vars );
+                    my $rcpt = $self->_render_recipient( $cc, \%vars );
                     ##! 32: 'New cc rcpt: ' . $cc . ' -> ' . $rcpt
                     push @cclist, $rcpt if($rcpt);
                 }
@@ -453,7 +479,7 @@ sub notify {
         }
 
         if (!$vars{to}) {
-            CTX('log')->system()->warn("Failed sending notification - no receipient");
+            CTX('log')->system()->warn("Failed sending notification $msg - no recipient");
 
             push @failed, $handle;
             next MAIL_HANDLE;
@@ -474,7 +500,7 @@ sub notify {
 
 =cut
 
-sub _render_receipient {
+sub _render_recipient {
 
     ##! 1: 'Start'
     my $self = shift;
@@ -485,7 +511,7 @@ sub _render_receipient {
     ##! 64: $vars
 
     if (!$template) {
-        CTX('log')->system()->warn("No receipient adress or template given");
+        CTX('log')->system()->warn("No recipient adress or template given");
         return;
     }
 
@@ -495,14 +521,14 @@ sub _render_receipient {
     $rcpt =~ s/\s+//;
 
     if (!$rcpt) {
-        CTX('log')->system()->warn("Receipient address is empty after render!");
+        CTX('log')->system()->warn("Recipient address is empty after render!");
         CTX('log')->system()->debug("Template was $template");
         return;
     }
 
     if ($rcpt !~ /^[\w\.-]+\@[\w\.-]+$/) {
         ##! 8: 'This is not an address ' . $rcpt
-        CTX('log')->system()->warn("Receipient address is not properly formatted: $rcpt");
+        CTX('log')->system()->warn("Recipient address is not properly formatted: $rcpt");
         CTX('log')->system()->debug("Template was $template");
         return;
     }
@@ -524,9 +550,11 @@ sub _send_message {
     my $cfg = shift;
     my $vars = shift;
 
+    ##! 64: $cfg
+    ##! 32: $vars
+
     # Parse the templates - txt and html
     # it is ok to not have a plain text version
-
     my ($plain, $html);
     if ($self->use_html()) {
         ##! 16: 'Using html template'
@@ -550,19 +578,54 @@ sub _send_message {
         return 0;
     }
 
-    # Go ahead and build the message
-    # Parse the subject
-    my $subject = $self->_render_template($cfg->{subject}, $vars);
-    ##! 16: $subject
+
+    my $subject;
+    # Regular mode - build subject from template
+    if ($cfg->{subject}) {
+        $subject = $self->_render_template($cfg->{subject}, $vars);
+
+        # If a prefix is defined we prepend it to the subject
+        if ($vars->{prefix}) {
+            ##! 32: 'Adding prefix '.$vars->{prefix}
+            $subject = $vars->{prefix}.' '.$subject;
+        }
+
+    # If subject is explicitly set to undef in the config we use the
+    # first line of the plain body text as subject line
+    } elsif (exists $cfg->{subject}) {
+        if (!$plain) {
+            CTX('log')->system()->error("No plain body found to shift of mail subject ($cfg->{template})");
+            return 0;
+        }
+        my $empty;
+        ($subject, $empty, $plain) = split "\n", $plain, 3;
+        # something went wrong if empty is not empty
+        if ($empty || !$plain) {
+            CTX('log')->system()->error("Got invalid body text while trying to shift of mail subject ($cfg->{template})");
+            CTX('log')->system()->debug("Expected seperator line is not empty but '$empty'") if ($empty);
+            CTX('log')->system()->debug("Remaining body is empty") unless ($plain);
+            return 0;
+        }
+
+    # No subject at all - thats not ok
+    } else {
+        CTX('log')->system()->error("Mail subject is not defined ($cfg->{template})");
+        return 0;
+    }
+
+    # Rendering went wrong or something broke in the split/shift operation
     if (!$subject) {
         CTX('log')->system()->error("Mail subject is empty ($cfg->{template})");
         return 0;
     }
 
+    ##! 16: $subject
+
+    # Go ahead and build the message
     my @args = (
         From    => Encode::encode("UTF-8", $cfg->{from}),
         To      => Encode::encode("UTF-8", $vars->{to}),
-        Subject => Encode::encode("MIME-B", "$vars->{prefix} $subject"),
+        Subject => Encode::encode("MIME-B", $subject),
         Charset => 'UTF-8',
         'X-User-Agent' => 'OpenXPKI Notification Service',
     );
@@ -684,7 +747,7 @@ sub _send_message {
     } else {
 
         # Host accepts a Net::SMTP object
-        # @res is the list of receipients processed, empty on error
+        # @res is the list of recipients processed, empty on error
         $res = $msg->smtpsend( Host => $smtp, MailFrom => $cfg->{from} );
     }
 

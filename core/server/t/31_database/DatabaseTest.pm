@@ -3,13 +3,16 @@ use Moose;
 
 use Test::More;
 use Test::Exception;
-use OpenXPKI::MooseParams;
 use Log::Log4perl;
-use Moose::Util::TypeConstraints;
+use Moose::Util::TypeConstraints; # PLEASE NOTE: this enables all warnings via Moose::Exporter
+use Module::Load ();
+use Type::Params qw( signature_for );
 
 use FindBin qw( $Bin );
 require "$Bin/DatabaseTestConnection.pm";
 
+# should be done after imports to safely disable warnings in Perl < 5.36
+use experimental 'signatures';
 
 has 'columns' => (
     is => 'rw',
@@ -25,7 +28,7 @@ has 'data' => (
     predicate => 'has_data',
 );
 
-enum 'DBMS', [qw( sqlite mysql mariadb oracle postgres )];
+enum 'DBMS', [qw( SQLite MySQL MariaDB MariaDB2 Oracle PostgreSQL )];
 
 # restrict tests to certain dbms
 has 'test_only' => (
@@ -69,26 +72,26 @@ sub shall_test {
     return ($self->test_all_dbs or $self->_test_db(sub {/^\Q$dbtype\E$/}));
 }
 
-sub get_dbi_params {
-    my ($self, $db_type) = positional_args(\@_,
-        { isa => 'DBMS' },
-    );
-
+signature_for get_dbi_params => (
+    method => 1,
+    positional => [ 'DBMS' ],
+);
+sub get_dbi_params ($self, $db_type) {
     my %common = (
         lock_timeout => 1,
     );
 
-    if ('sqlite' eq $db_type) {
+    if ('SQLite' eq $db_type) {
         return {
-            type => "SQLite",
+            type => $db_type,
             %common,
             name => ($self->sqlite_db || ":memory:"),
         }
     }
 
-    if ('oracle' eq $db_type) {
+    if ('Oracle' eq $db_type) {
         return {
-            type => "Oracle",
+            type => $db_type,
             %common,
             name => $ENV{OXI_TEST_DB_ORACLE_NAME},
             user => $ENV{OXI_TEST_DB_ORACLE_USER},
@@ -105,25 +108,17 @@ sub get_dbi_params {
         passwd => $ENV{OXI_TEST_DB_MYSQL_PASSWORD},
     );
 
-    if ('mysql' eq $db_type) {
+    if ('MySQL' eq $db_type or 'MariaDB' eq $db_type or 'MariaDB2' eq $db_type) {
         return {
-            type => "MySQL",
+            type => $db_type,
             %common,
             %mysql_params,
         }
     }
 
-    if ('mariadb' eq $db_type) {
+    if ('PostgreSQL' eq $db_type) {
         return {
-            type => "MariaDB",
-            %common,
-            %mysql_params,
-        }
-    }
-
-    if ('postgres' eq $db_type) {
-        return {
-            type => "PostgreSQL",
+            type => $db_type,
             %common,
             $ENV{OXI_TEST_DB_POSTGRES_DBHOST} ? ( host => $ENV{OXI_TEST_DB_POSTGRES_DBHOST} ) : (),
             $ENV{OXI_TEST_DB_POSTGRES_DBPORT} ? ( port => $ENV{OXI_TEST_DB_POSTGRES_DBPORT} ) : (),
@@ -135,20 +130,18 @@ sub get_dbi_params {
 }
 
 # Run the given tests against all available DBMS
-sub run {
-    my ($self, $name, $plan, $tests) = positional_args(\@_,
-        { isa => 'Str'},
-        { isa => 'Int'},
-        { isa => 'CodeRef' },
-    );
-
+signature_for run => (
+    method => 1,
+    positional => [ 'Str', 'Int', 'CodeRef' ],
+);
+sub run ($self, $name, $plan, $tests) {
     # creates and executes subtests
     my $SUBTEST = sub {
         my ($dbtype, $dbi_driver, $env_var, $testname) = @_;
 
         return note "$env_var not set" if ($env_var and not $ENV{$env_var});
         return unless $self->shall_test($dbtype);
-        return note "$dbi_driver is not installed" unless eval "require $dbi_driver";
+        eval { Module::Load::load($dbi_driver) }; return note "$dbi_driver is not installed" if $@;
 
         my $dbi_params = $self->get_dbi_params($dbtype);
 
@@ -188,11 +181,12 @@ sub run {
         };
     };
 
-    $SUBTEST->('sqlite',   'DBD::SQLite', undef,                       "$name (SQLite)");
-    $SUBTEST->('oracle',   'DBD::Oracle', 'OXI_TEST_DB_ORACLE_NAME',   "$name (Oracle)");
-    $SUBTEST->('mysql',    'DBD::mysql',  'OXI_TEST_DB_MYSQL_NAME',    "$name (MySQL)");
-    $SUBTEST->('mariadb',  'DBD::mysql',  'OXI_TEST_DB_MYSQL_NAME',    "$name (MariaDB)");
-    $SUBTEST->('postgres', 'DBD::Pg',     'OXI_TEST_DB_POSTGRES_NAME', "$name (PostgreSQL)");
+    $SUBTEST->('SQLite',     'DBD::SQLite',  undef,                       "$name (SQLite)");
+    $SUBTEST->('Oracle',     'DBD::Oracle',  'OXI_TEST_DB_ORACLE_NAME',   "$name (Oracle)");
+    $SUBTEST->('MySQL',      'DBD::mysql',   'OXI_TEST_DB_MYSQL_NAME',    "$name (MySQL)");
+    $SUBTEST->('MariaDB',    'DBD::mysql',   'OXI_TEST_DB_MYSQL_NAME',    "$name (MariaDB)");
+    $SUBTEST->('MariaDB2',   'DBD::MariaDB', 'OXI_TEST_DB_MYSQL_NAME',    "$name (MariaDB2)");
+    $SUBTEST->('PostgreSQL', 'DBD::Pg',      'OXI_TEST_DB_POSTGRES_NAME', "$name (PostgreSQL)");
 }
 
 __PACKAGE__->meta->make_immutable;

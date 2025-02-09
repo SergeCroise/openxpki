@@ -1,6 +1,7 @@
 package OpenXPKI::Crypt::CRL;
 
 use Moose;
+with 'OpenXPKI::Role::RevocationReasonCode';
 
 # some code imported from Crypt::X509::CRL
 
@@ -141,18 +142,6 @@ has oidmap => (
         "0.9.2342.19200300.100.1.1" => "UID",
         "0.9.2342.19200300.100.1.25" => "DC",
     }}
-);
-
-has crl_reason => (
-    is => 'ro',
-    isa => 'ArrayRef',
-    required => 0,
-    lazy => 1,
-    default => sub {
-        return [qw(unspecified keyCompromise cACompromise affiliationChanged superseded
-                cessationOfOperation certificateHold removeFromCRL privilegeWithdrawn
-                aACompromise)];
-    }
 );
 
 around BUILDARGS => sub {
@@ -440,16 +429,16 @@ sub __revoked_certs_list {
     my $items = $self->parsed()->{'tbsCertList'}->{'revokedCertificates'};
     return {} unless ($items);
     my $parser = $self->_asn1()->find('CRLReason');
-    my $crl_reason_list = $self->crl_reason();
+    my $crl_reason_list = $self->reason_code_list();
     foreach my $crl_item (@{$items}) {
         my $cert = $self->_asn1()->find('RevokedCert')->decode( $crl_item );
         my @v = ($cert->{'revocationDate'}->{'generalTime'} // $cert->{'revocationDate'}->{'utcTime'} // 0, undef);
         foreach my $ext (@{$cert->{crlEntryExtensions}}) {
             if ( $ext->{'extnID'} eq '2.5.29.21' ) { # OID for crlReason
-                my $reason = $parser->decode( $ext->{'extnValue'} );
-                if (!$parser->error && defined $reason) {
-                    $v[1] = $crl_reason_list->[$reason];
-                }
+                # The value portion is an enum item which consists of 3 bytes
+                # the last one is the assigned integer of the enum structure
+                my $rc = ord(substr($_->{extnValue},2));
+                $v[1] = $crl_reason_list->[$rc] if (defined $rc);
                 last;
             }
         }

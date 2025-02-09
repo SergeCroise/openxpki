@@ -1,13 +1,12 @@
 #!/usr/bin/perl
-use strict;
-use warnings;
+use OpenXPKI;
 
 # Core modules
 use FindBin qw( $Bin );
 
 # CPAN modules
 use Test::More;
-use Test::Deep;
+use Test::Deep ':v1';
 use Test::Exception;
 use Data::UUID;
 
@@ -19,7 +18,6 @@ use Data::UUID;
 use lib "$Bin/../lib";
 use lib "$Bin";
 use OpenXPKI::Server::Context qw( CTX );
-use OpenXPKI::Server::Database; # to get AUTO_ID
 use OpenXPKI::Test;
 
 plan tests => 3;

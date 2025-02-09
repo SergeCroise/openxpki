@@ -6,10 +6,11 @@ use warnings;
 use English;
 use FindBin qw( $Bin );
 use File::Temp qw( tempdir );
+use Module::Load ();
 
 # CPAN modules
 use Test::More;
-use Test::Deep;
+use Test::Deep ':v1';
 use Test::Exception;
 use DateTime;
 
@@ -22,7 +23,10 @@ use OpenXPKI::Test;
 plan tests => 10;
 
 SKIP: {
-    eval { use Module::Load; load("OpenXPKI::Crypto::Secret::Split"); load("OpenXPKI::Crypto::Secret::SplitEncrypted") };
+    eval {
+        Module::Load::load("OpenXPKI::Crypto::Secret::Split");
+        Module::Load::load("OpenXPKI::Crypto::Secret::SplitEncrypted");
+    };
     skip 'EE only test', 10 if $@;
 
     my $temp_tokenmanager = tempdir( CLEANUP => 1 );

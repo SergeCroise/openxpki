@@ -1,5 +1,5 @@
 package OpenXPKI::Server::API2::Plugin::Crypto::scep_message_handler;
-use OpenXPKI::Server::API2::EasyPlugin;
+use OpenXPKI -plugin;
 
 =head1 NAME
 
@@ -12,7 +12,7 @@ use English;
 use MIME::Base64;
 # Project modules
 use OpenXPKI::Server::Context qw( CTX );
-use OpenXPKI::Server::API2::Types;
+use OpenXPKI::Types;
 use OpenXPKI::Debug;
 use OpenXPKI::Exception;
 use OpenXPKI::Crypt::PKCS7::SCEP;
@@ -96,7 +96,12 @@ command "scep_unwrap_message" => {
 
     ##! 16: $token_alias
     my $token = CTX('crypto_layer')->get_token({ TYPE => 'scep', NAME => $token_alias });
-    $req->ratoken_key( $token );
+    if (my $key_object = $token->get_key_object()) {
+        ##! 32: 'Using internal rsa object'
+        $req->ratoken_key( $key_object );
+    } else {
+        $req->ratoken_key( $token );
+    }
 
     if (!$params->noverify) {
         ##! 64: 'run pkcs7_verify'
@@ -224,7 +229,11 @@ sub __generate_response {
         return encode_base64($req->create_pending_response());
     }
 
-    return encode_base64($req->create_failure_response( $params->failinfo ));
+    if ($mode eq 'failure') {
+        return encode_base64($req->create_failure_response( $params->failinfo ));
+    }
+
+    die "Unknown mode '$mode' given to __generate_response()";
 }
 
 __PACKAGE__->meta->make_immutable;

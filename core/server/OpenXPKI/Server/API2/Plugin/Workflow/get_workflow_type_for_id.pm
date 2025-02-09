@@ -1,5 +1,5 @@
 package OpenXPKI::Server::API2::Plugin::Workflow::get_workflow_type_for_id;
-use OpenXPKI::Server::API2::EasyPlugin;
+use OpenXPKI -plugin;
 
 =head1 NAME
 
@@ -10,7 +10,7 @@ OpenXPKI::Server::API2::Plugin::Workflow::get_workflow_type_for_id
 # Project modules
 use OpenXPKI::Debug;
 use OpenXPKI::Server::Context qw( CTX );
-use OpenXPKI::Server::API2::Types;
+use OpenXPKI::Types;
 
 
 

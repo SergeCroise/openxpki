@@ -111,7 +111,7 @@ sub __load_profile
 
     if (!$config->exists(['profile', $profile_name])) {
         OpenXPKI::Exception->throw (
-            message => "I18N_OPENXPKI_CRYPTO_PROFILE_CERTIFICATE_LOAD_PROFILE_UNDEFINED_PROFILE");
+            message => "Given profile does not exist");
     }
 
     # Init defaults
@@ -122,19 +122,24 @@ sub __load_profile
         STRING_MASK => 'utf8only',
     };
 
-    ## check if those are overriden in config
-    foreach my $key (keys %{$self->{PROFILE}} ) {
-        my $value = $config->get(['profile', $profile_name, lc($key)]);
+    # read as scalar from profile with fallback to default
+    foreach my $key ('digest','string_mask') {
+        my $value = $config->get(['profile', $profile_name, $key]) //
+            $config->get(['profile', 'default', $key]);
+        $self->{PROFILE}->{uc($key)} = $value if (defined $value);
+    }
 
-        # Test for realm default
-        if (!defined $value) {
-            $value = $config->get(['profile', 'default', lc($key)]);
-        }
+    # read as hash from profile with fallback to default
+    foreach my $key ('padding') {
+        my $value = $config->get_hash(['profile', $profile_name, $key]) //
+            $config->get_hash(['profile', 'default', $key]);
+        $self->{PROFILE}->{uc($key)} = $value if (defined $value);
+    }
 
-        if (defined $value) {
-            $self->{PROFILE}->{$key} = $value;
-            ##! 16: "Override $key from profile with $value"
-        }
+    # serial number configuration is ALWAYS in default (see #680)
+    foreach my $key ('increasing_serials', 'randomized_serial_bytes') {
+        my $value = $config->get(['profile', 'default', $key]);
+        $self->{PROFILE}->{uc($key)} = $value if (defined $value);
     }
 
     ###########################################################################
@@ -158,7 +163,7 @@ sub __load_profile
     my $notafter = $config->get([ @validity_path, 'notafter' ]);
     if (! $notafter) {
         OpenXPKI::Exception->throw (
-            message => "I18N_OPENXPKI_CRYPTO_PROFILE_CERTIFICATE_LOAD_PROFILE_VALIDITY_NOTAFTER_NOT_DEFINED",
+            message => "Profile has no notafter date defined",
         );
     }
 

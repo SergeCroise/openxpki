@@ -1,13 +1,7 @@
-## OpenXPKI::Crypto::Toolkit
-## Written 2006 by Alexander Klink for the OpenXPKI project
-## based on OpenXPKI::Crypto::Backend::OpenSSL,
-## written by Michael Bell for the OpenXPKI project
-## (C) Copyright 2006 by The OpenXPKI Project
 package OpenXPKI::Crypto::Toolkit;
 
 use strict;
 use warnings;
-use utf8; ## pack/unpack is too slow
 
 use Class::Std;
 
@@ -21,6 +15,7 @@ use OpenXPKI::FileUtils;
 use English;
 
 use File::Spec;
+use Module::Load ();
 
 # attributes
 my %token_type_of     :ATTR; # the token type
@@ -285,7 +280,7 @@ sub __init_engine
     }
 
     my $engine = $base_class_of{$ident} . '::Engine::' . $params_of{$ident}->{ENGINE};
-    eval "use $engine;";
+    eval { Module::Load::load($engine) };
     if ($EVAL_ERROR)
     {
         OpenXPKI::Exception->throw (
@@ -340,7 +335,7 @@ sub __init_shell
     }
 
     my $cli_class = $base_class_of{$ident} . '::CLI';
-    eval "use $cli_class;";
+    eval { Module::Load::load($cli_class) };
     if ($EVAL_ERROR ne '') {
         OpenXPKI::Exception->throw (
             message => 'I18N_OPENXPKI_TOOLKIT_INIT_SHELL_USE_FAILED',
@@ -411,17 +406,18 @@ sub command {
     my $cmd  = $base_class_of{$ident} . '::Command::' . $arg_ref->{COMMAND};
     delete $arg_ref->{COMMAND};
 
-    eval "require $cmd";
-    if ($EVAL_ERROR ne '') {
+    eval { Module::Load::load($cmd) };
+    if ($EVAL_ERROR) {
         OpenXPKI::Exception->throw(
             message  => 'I18N_OPENXPKI_TOOLKIT_COMMAND_REQUIRE_FAILED',
             params   => {'EVAL_ERROR' => $EVAL_ERROR},
         );
     }
     ##! 2: "Command: $cmd"
+    my $cmd_ref;
 
     my $ret = eval {
-        my $cmd_ref = $cmd->new({
+        $cmd_ref = $cmd->new({
             %{$command_params_of{$ident}},
             %{$arg_ref},
             TOKEN_TYPE => $token_type_of{$ident},
@@ -483,12 +479,14 @@ sub command {
     {
         ##! 16: 'exception: ' . Dumper $exc
         ##! 16: 'eval_error: ' . $EVAL_ERROR
+        $cmd_ref->cleanup() if $cmd_ref;
         $cli_of{$ident}->cleanup(); ## this is safe
         OpenXPKI::Exception->throw (
             message  => "I18N_OPENXPKI_TOOLKIT_COMMAND_FAILED",
             params   => {"COMMAND" => $cmd},
             children => [ $exc ]);
     } elsif ($EVAL_ERROR ne '') {
+        $cmd_ref->cleanup() if $cmd_ref;
         OpenXPKI::Exception->throw(
             message => 'I18N_OPENXPKI_TOOLKIT_COMMAND_EVAL_ERROR',
             params => {
@@ -496,6 +494,7 @@ sub command {
             },
         );
     } else {
+        $cmd_ref->cleanup() if $cmd_ref;
         ##! 4: "end"
         return $ret;
     }
@@ -567,7 +566,7 @@ OpenXPKI::Crypto::Toolkit - an ABSTRACT superclass for Backends and Tools
 =head1 Description
 
 This class provides an abstraction for both Backends and Tools, i.e.
-OpenXPKI::Crypto::Backend::OpenSSL or OpenXPKI::Crypto::Tool::SCEP
+OpenXPKI::Crypto::Backend::OpenSSL.
 Note that it can not be instantiated.
 
 =head1 Functions
@@ -596,4 +595,3 @@ as first parameter followed by a hash with parameters.
 =head1 See Also
 
 OpenXPKI::Crypto::Backend::OpenSSL
-OpenXPKI::Crypto::Tool::SCEP

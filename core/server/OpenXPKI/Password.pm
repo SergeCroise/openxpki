@@ -2,7 +2,6 @@ package OpenXPKI::Password;
 
 use strict;
 use warnings;
-use utf8;
 
 use OpenXPKI::Debug;
 use OpenXPKI::Exception;
@@ -14,7 +13,6 @@ use Digest::MD5;
 use Proc::SafeExec;
 use MIME::Base64;
 use Crypt::Argon2;
-use POSIX;
 
 sub hash {
 

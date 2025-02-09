@@ -1,5 +1,5 @@
 package OpenXPKI::Server::API2::Plugin::Token::get_token_alias_by_x;
-use OpenXPKI::Server::API2::EasyPlugin;
+use OpenXPKI -plugin;
 
 =head1 NAME
 
@@ -25,7 +25,7 @@ B<Parameters>
 
 =over
 
-=item * C<type> I<Str> - Token type (for possible values see L<OpenXPKI::Server::API2::Types/TokenType>). Required.
+=item * C<type> I<Str> - Token type (for possible values see L<OpenXPKI::Types/TokenType>). Required.
 
 =item * C<validity> I<HashRef> - two datetime objects, given as hash keys
 I<notbefore> and I<notafter>. Hash values of C<undef> will be interpreted as
@@ -79,6 +79,18 @@ command "get_token_alias_by_group" => {
     my ($self, $params) = @_;
 
     return $self->_token_alias_by_group($params->group, $params->validity);
+};
+
+
+=head2 list_token_groups
+
+Return the map to assign group names to the token types.
+
+=cut
+command "list_token_groups" => {
+} => sub {
+    my ($self, $params) = @_;
+    return CTX('config')->get_hash('crypto.type');
 };
 
 #

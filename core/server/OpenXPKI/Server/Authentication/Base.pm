@@ -47,6 +47,14 @@ has history => (
     default => sub { return {} },
 );
 
+has log => (
+    lazy => 1,
+    is => 'rw',
+    isa => 'Object',
+    default => sub { return CTX('log')->auth(); }
+);
+
+# logger is deprecated, please use log
 has logger => (
     lazy => 1,
     is => 'rw',
@@ -102,7 +110,7 @@ sub get_userinfo {
     ##! 16: $username
     my $userinfo = CTX('config')->get_hash( [ @{$self->prefix()}, 'user', $username ] ) || {};
     ##! 64: $userinfo
-    $self->logger->trace("Userinfo for $username is " . Dumper $userinfo) if ($self->logger->is_trace);
+    $self->log->trace("Userinfo for $username is " . Dumper $userinfo) if ($self->log->is_trace);
     return $userinfo;
 
 }
@@ -124,22 +132,30 @@ sub register_login {
     my $dp_val = CTX('api2')->get_data_pool_entry(
         namespace => "sys.auth.history",
         key =>  $userid,
+        deserialize => 'simple',
     );
 
-    my $ser = OpenXPKI::Serialization::Simple->new();
+    my $userinfo = $handle->userinfo();
+    # in case the userinfo hash is not set, create it and write back
+    if (!defined $userinfo) {
+        $userinfo = {};
+        $handle->userinfo($userinfo);
+    }
+
     if ($dp_val) {
-        my $val = $ser->deserialize($dp_val->{value});
-        $handle->userinfo()->{last_login} = $val->{last_login};
-        $self->logger->trace('Got last_login from datapool: ' . Dumper $val) if ($self->logger->is_trace);
+        my $val = $dp_val->{value};
+        $userinfo->{last_login} = $val->{last_login};
+        $self->log->trace('Got last_login from datapool: ' . Dumper $val) if ($self->log->is_trace);
     } else {
-        $handle->userinfo()->{last_login} = time();
-        $self->logger->trace('No last_login found');
+        $userinfo->{last_login} = time();
+        $self->log->trace('No last_login found');
     }
 
     my %item = (
         namespace => "sys.auth.history",
         key => sha256_hex($handle->userid()),
-        value => $ser->serialize({last_login => time()}),
+        value => { last_login => time() },
+        serialize => 'simple',
         force => 1,
     );
 
@@ -148,7 +164,7 @@ sub register_login {
         VALIDITYFORMAT => 'detect'
     })->epoch() if ($history->{last_login});
 
-    $self->logger->trace('Update last_login information: ' . Dumper \%item) if ($self->logger->is_trace);
+    $self->log->trace('Update last_login information: ' . Dumper \%item) if ($self->log->is_trace);
 
     CTX('api2')->set_data_pool_entry(%item);
 
@@ -170,12 +186,12 @@ sub map_role {
     # role contained in map
     return $rolemap->{$role} if ($rolemap->{$role});
 
-    $self->logger->debug("Role $role not found in map, check for _default");
+    $self->log->debug("Role $role not found in map, check for _default");
 
     # the asterisk marks a default role
     return $rolemap->{'_default'} if ($rolemap->{'_default'});
 
-    $self->logger->info("Unknown role $role was given");
+    $self->log->info("Unknown role $role was given");
 
     # no luck this time
     return ;
@@ -251,7 +267,7 @@ functionality
 =head3 get_userid
 
 While the username is related to the credentials that where used to
-authentuicate the userid should provide a unique and durable handle
+authenticate the userid should provide a unique and durable handle
 to link items to an identity. In case you have multiple authentication
 backends the userid should be prefixed by a namespace - this method is
 a simpe wrapper that expects the username and returns it prefixed with

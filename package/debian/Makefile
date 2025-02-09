@@ -14,28 +14,22 @@ DEBIAN_VERSION = $(shell cat /etc/debian_version)
 # build-deps.list as they will otherwise built again!
 EXTERNAL=				\
 	Class__Observable \
-	Config__Merge \
-	Crypt__Argon2 \
-	Crypt__LibSCEP \
+	Connector \
 	Crypt__OpenSSL__AES \
 	Crypt__PKCS10 \
-	Crypt__X509 \
 	DBIx__Handler \
 	DBIx__TransactionManager \
-	Feature__Compat__Try \
-	Syntax__Keyword__Try \
-	Git__PurePerl \
-	JSON__MaybeXS \
 	Log__Log4perl__Layout__JSON \
 	Proc__SafeExec \
-	YAML__Tiny \
-	Connector \
 	Workflow
 
+# Bookworm ships with v0.55 so as long as we dont update
+# (or debian keeps pace) we dont need to build this ourselves
+EXTRA= \
+	Crypt__X509
+
 CORE = \
-    CGI \
-    Module__Build__Tiny \
-    Module__Load
+	CGI
 
 .PHONY : $(PACKAGES) $(EXTERNAL) CGI
 
@@ -45,7 +39,7 @@ cpan: cpan_dependency
 
 cpan_dependency: $(EXTERNAL)
 
-release: cpan_dependency Crypt__LibSCEP openxpki
+release: cpan_dependency openxpki
 
 default:	clean
 	$(MAKE) $(EXTERNAL)
@@ -56,7 +50,7 @@ default:	clean
 # run dh-make-perl with --install --recursive to auto-build/add missing dependancies
 # for Buster this is required for at least Feature::Compat::Try pulling in
 # Syntax::Keyword::Try and other deps that are too old in buster repos
-$(EXTERNAL):
+$(EXTERNAL) $(EXTRA):
 	test -d deb || mkdir deb
 	test -d deb/cpan || mkdir deb/cpan/
 	cd deb/cpan/ && DEBEMAIL=debian@openxpki.org DEBFULLNAME="OpenXPKI Foundation" DEB_BUILD_OPTIONS=nocheck dh-make-perl --build $($@_BUILDOPTS) --recursive --install --cpan $(subst __,::,$@)

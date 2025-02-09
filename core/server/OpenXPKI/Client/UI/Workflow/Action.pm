@@ -2,12 +2,21 @@ package OpenXPKI::Client::UI::Workflow::Action;
 use Moose;
 
 extends 'OpenXPKI::Client::UI::Workflow';
+with 'OpenXPKI::Client::UI::Role::QueryCache';
 
 # Core modules
 use Data::Dumper;
+use List::Util qw( any none );
 
 # CPAN modules
 use Log::Log4perl::MDC;
+use Type::Params qw( signature_for );
+
+# Project modules
+use OpenXPKI::Util;
+
+# should be done after imports to safely disable warnings in Perl < 5.36
+use experimental 'signatures';
 
 =head1 UI Methods
 
@@ -25,7 +34,8 @@ The generic action is the default when sending a workflow generated form back
 to the server. You need to setup the handler from the rendering step, direct
 posting is not allowed. The cgi environment must present the key I<wf_token>
 which is a reference to a session based config hash. The config can be created
-using __register_wf_token, recognized keys are:
+using L<OpenXPKI::Client::UI::Result/__wf_token_extra_param> or
+L<OpenXPKI::Client::UI::Result/__wf_token_field>, recognized keys are:
 
 =over
 
@@ -66,18 +76,10 @@ sub action_index {
     my $self = shift;
     my $args = shift;
 
-    my $wf_token = $self->param('wf_token') || '';
-
     my $wf_info;
-    # wf_token found, so its a real action
-    if (!$wf_token) {
-        $self->status->error('I18N_OPENXPKI_UI_WORKFLOW_INVALID_REQUEST_ACTION_WITHOUT_TOKEN!');
-        return $self;
-    }
+    my $wf_args = $self->__resolve_wf_token() or return $self;
 
-    my $wf_args = $self->__fetch_wf_token( $wf_token );
-
-    $self->logger()->trace( "wf args: " . Dumper $wf_args) if $self->logger->is_trace;
+    $self->log->trace("wf args from token: " . Dumper $wf_args) if $self->log->is_trace;
 
     # check for delegation
     if ($wf_args->{wf_handler}) {
@@ -86,17 +88,9 @@ sub action_index {
 
     my %wf_param;
     if ($wf_args->{wf_fields}) {
-        %wf_param = %{$self->param_from_fields( $wf_args->{wf_fields} )};
-        $self->logger()->trace( "wf fields: " . Dumper \%wf_param ) if $self->logger->is_trace;
+        %wf_param = %{$self->__request_values_for_fields( $wf_args->{wf_fields} )};
+        $self->log->trace( "wf parameters from request: " . Dumper \%wf_param ) if $self->log->is_trace;
     }
-
-    # take over params from token, if any
-    if($wf_args->{wf_param}) {
-        %wf_param = (%wf_param, %{$wf_args->{wf_param}});
-    }
-
-    $self->logger()->trace( "wf params: " . Dumper \%wf_param ) if $self->logger->is_trace;
-    ##! 64: "wf params: " . Dumper \%wf_param
 
     if ($wf_args->{wf_id}) {
 
@@ -105,7 +99,7 @@ sub action_index {
             return $self;
         }
         Log::Log4perl::MDC->put('wfid', $wf_args->{wf_id});
-        $self->logger()->info(sprintf "Run %s on workflow #%01d", $wf_args->{wf_action}, $wf_args->{wf_id} );
+        $self->log->info(sprintf "Run '%s' on workflow #%s", $wf_args->{wf_action}, $wf_args->{wf_id} );
 
         # send input data to workflow
         $wf_info = $self->send_command_v2( 'execute_workflow_activity', {
@@ -121,21 +115,21 @@ sub action_index {
                 return $self;
             }
 
-            $self->logger()->error("workflow acton failed!");
+            $self->log->error("workflow acton failed!");
             my $extra = { wf_id => $wf_args->{wf_id}, wf_action => $wf_args->{wf_action} };
             return $self->internal_redirect('workflow!load' => $extra);
         }
 
-        $self->logger()->trace("wf info after execute: " . Dumper $wf_info ) if $self->logger->is_trace;
+        $self->log->trace("wf info after execute: " . Dumper $wf_info ) if $self->log->is_trace;
         # purge the workflow token
-        $self->__purge_wf_token( $wf_token );
+        $self->__purge_wf_token;
 
     } elsif ($wf_args->{wf_type}) {
 
 
         $wf_info = $self->send_command_v2( 'create_workflow_instance', {
             workflow => $wf_args->{wf_type}, params => \%wf_param, ui_info => 1,
-            $self->__tenant(),
+            $self->__tenant_param(),
         });
         if (!$wf_info) {
 
@@ -143,18 +137,18 @@ sub action_index {
                 return $self;
             }
 
-            $self->logger()->error("Create workflow failed");
+            $self->log->error("Create workflow failed");
             # pass required arguments via extra and reload init page
 
             my $extra = { wf_type => $wf_args->{wf_type} };
             return $self->internal_redirect('workflow!index' => $extra);
         }
-        $self->logger()->trace("wf info on create: " . Dumper $wf_info ) if $self->logger->is_trace;
+        $self->log->trace("wf info on create: " . Dumper $wf_info ) if $self->log->is_trace;
 
-        $self->logger()->info(sprintf "Create new workflow %s, got id %01d",  $wf_args->{wf_type}, $wf_info->{workflow}->{id} );
+        $self->log->info(sprintf "Create new workflow %s, got id #%s",  $wf_args->{wf_type}, $wf_info->{workflow}->{id} );
 
         # purge the workflow token
-        $self->__purge_wf_token( $wf_token );
+        $self->__purge_wf_token;
 
         # always redirect after create to have the url pointing to the created workflow
         # do not redirect for "one shot workflows" or workflows already in a final state
@@ -162,7 +156,7 @@ sub action_index {
         my $proc_state = $wf_info->{workflow}->{proc_state};
 
         $wf_args->{redirect} = (
-            $wf_info->{workflow}->{id} > 0
+            OpenXPKI::Util->is_regular_workflow($wf_info->{workflow}->{id})
             and $proc_state ne 'finished'
             and $proc_state ne 'archived'
         );
@@ -177,7 +171,7 @@ sub action_index {
     my $wf_action;
     if ($wf_info->{state}->{autoselect}) {
         $wf_action = $wf_info->{state}->{autoselect};
-        $self->logger()->debug("Autoselect set: $wf_action");
+        $self->log->debug("Autoselect set: $wf_action");
     } else {
         $wf_action = $self->__get_next_auto_action($wf_info);
     }
@@ -216,16 +210,8 @@ sub action_handle {
     my $self = shift;
     my $args = shift;
 
-    my $wf_token = $self->param('wf_token') || '';
-
     my $wf_info;
-    # wf_token found, so its a real action
-    if (!$wf_token) {
-        $self->status->error('I18N_OPENXPKI_UI_WORKFLOW_INVALID_REQUEST_ACTION_WITHOUT_TOKEN!');
-        return $self;
-    }
-
-    my $wf_args = $self->__fetch_wf_token( $wf_token );
+    my $wf_args = $self->__resolve_wf_token() or return $self;
 
     if (!$wf_args->{wf_id}) {
         $self->status->error('I18N_OPENXPKI_UI_WORKFLOW_INVALID_REQUEST_HANDLE_WITHOUT_ID!');
@@ -243,28 +229,28 @@ sub action_handle {
 
 
     if ('fail' eq $handle) {
-        $self->logger()->info(sprintf "Workflow %01d set to failure by operator", $wf_args->{wf_id} );
+        $self->log->info(sprintf "Workflow #%s set to failure by operator", $wf_args->{wf_id} );
 
         $wf_info = $self->send_command_v2( 'fail_workflow', {
             id => $wf_args->{wf_id},
         });
     } elsif ('wakeup' eq $handle) {
-        $self->logger()->info(sprintf "Workflow %01d trigger wakeup", $wf_args->{wf_id} );
+        $self->log->info(sprintf "Workflow #%s trigger wakeup", $wf_args->{wf_id} );
         $wf_info = $self->send_command_v2( 'wakeup_workflow', {
             id => $wf_args->{wf_id}, async => 1, wait => 1
         });
     } elsif ('resume' eq $handle) {
-        $self->logger()->info(sprintf "Workflow %01d trigger resume", $wf_args->{wf_id} );
+        $self->log->info(sprintf "Workflow #%s trigger resume", $wf_args->{wf_id} );
         $wf_info = $self->send_command_v2( 'resume_workflow', {
             id => $wf_args->{wf_id}, async => 1, wait => 1
         });
     } elsif ('reset' eq $handle) {
-        $self->logger()->info(sprintf "Workflow %01d trigger reset", $wf_args->{wf_id} );
+        $self->log->info(sprintf "Workflow #%s trigger reset", $wf_args->{wf_id} );
         $wf_info = $self->send_command_v2( 'reset_workflow', {
             id => $wf_args->{wf_id}
         });
     } elsif ('archive' eq $handle) {
-        $self->logger()->info(sprintf "Workflow %01d trigger archive", $wf_args->{wf_id} );
+        $self->log->info(sprintf "Workflow #%s trigger archive", $wf_args->{wf_id} );
         $wf_info = $self->send_command_v2( 'archive_workflow', {
             id => $wf_args->{wf_id}
         });
@@ -310,16 +296,15 @@ sub action_select {
     my $args = shift;
 
     my $wf_action =  $self->param('wf_action');
-    $self->logger()->debug('activity select ' . $wf_action);
+    $self->log->debug('activity select ' . $wf_action);
 
     # can be either token or id
     my $wf_id = $self->param('wf_id');
     if (!$wf_id) {
-        my $wf_token = $self->param('wf_token');
-        my $wf_args = $self->__fetch_wf_token( $wf_token );
+        my $wf_args = $self->__resolve_wf_token() or return $self;
         $wf_id = $wf_args->{wf_id};
         if (!$wf_id) {
-            $self->logger()->error('No workflow id given');
+            $self->log->error('No workflow id given');
             $self->status->error('I18N_OPENXPKI_UI_WORKFLOW_UNABLE_TO_LOAD_WORKFLOW_INFORMATION');
             return $self;
         }
@@ -330,7 +315,7 @@ sub action_select {
         id => $wf_id,
         with_ui_info => 1,
     });
-    $self->logger()->trace('wf_info ' . Dumper  $wf_info) if $self->logger->is_trace;
+    $self->log->trace('wf_info ' . Dumper  $wf_info) if $self->log->is_trace;
 
     if (!$wf_info) {
         $self->status->error('I18N_OPENXPKI_UI_WORKFLOW_UNABLE_TO_LOAD_WORKFLOW_INFORMATION');
@@ -340,11 +325,11 @@ sub action_select {
     # If the activity has no fields and no ui class we proceed immediately
     # FIXME - really a good idea - intentional stop items without fields?
     my $wf_action_info = $wf_info->{activity}->{$wf_action};
-    $self->logger()->trace('wf_action_info ' . Dumper  $wf_action_info) if $self->logger->is_trace;
+    $self->log->trace('wf_action_info ' . Dumper  $wf_action_info) if $self->log->is_trace;
     if ((!$wf_action_info->{field} || (scalar @{$wf_action_info->{field}}) == 0) &&
         !$wf_action_info->{uihandle}) {
 
-        $self->logger()->debug('activity has no input - execute');
+        $self->log->debug('activity has no input - execute');
 
         # send input data to workflow
         $wf_info = $self->send_command_v2( 'execute_workflow_activity', {
@@ -379,7 +364,7 @@ sub action_search {
     my $self = shift;
     my $args = shift;
 
-    my $query = { $self->__tenant() };
+    my $query = { $self->__tenant_param() };
     my $verbose = {};
     my $input;
 
@@ -414,7 +399,7 @@ sub action_search {
     }
 
     # Read the query pattern for extra attributes from the session
-    my $spec = $self->_session->param('wfsearch')->{default};
+    my $spec = $self->session_param('wfsearch')->{default};
     my $attr = $self->__build_attribute_subquery( $spec->{attributes} );
 
     if (my $wf_creator = $self->param('wf_creator')) {
@@ -439,7 +424,7 @@ sub action_search {
 
     $query->{return_attributes} = $rattrib if ($rattrib);
 
-    $self->logger()->trace("query : " . Dumper $query) if $self->logger->is_trace;
+    $self->log->trace("query : " . Dumper $query) if $self->log->is_trace;
 
     my $result_count = $self->send_command_v2( 'search_workflow_instances_count', $query );
 
@@ -471,17 +456,17 @@ sub action_search {
     }
 
     my $queryid = $self->__save_query({
-        'type' => 'workflow',
-        'count' => $result_count,
-        'query' => $query,
-        'input' => $input,
-        'header' => $header,
-        'column' => $body,
-        'pager'  => $spec->{pager} || {},
-        'criteria' => \@criteria,
+        pagename => 'workflow',
+        count => $result_count,
+        query => $query,
+        input => $input,
+        header => $header,
+        column => $body,
+        pager_args => OpenXPKI::Util::filter_hash($spec->{pager}, qw(limit pagesizes pagersize)),
+        criteria => \@criteria,
     });
 
-    $self->redirect->to('workflow!result!id!'.$queryid);
+    $self->redirect->to("workflow!result!id!${queryid}");
 
     return $self;
 
@@ -501,22 +486,18 @@ sub action_bulk {
     my $self = shift;
 
     my $wf_token = $self->param('wf_token') || '';
-    if (!$wf_token) {
-        $self->status->error('I18N_OPENXPKI_UI_WORKFLOW_INVALID_REQUEST_ACTION_WITHOUT_TOKEN!');
-        return $self;
-    }
 
     # token contains the name of the action to do and extra params
-    my $wf_args = $self->__fetch_wf_token( $wf_token );
+    my $wf_args = $self->__resolve_wf_token() or return $self;
     if (!$wf_args->{wf_action}) {
         $self->status->error('I18N_OPENXPKI_UI_WORKFLOW_INVALID_REQUEST_HANDLE_WITHOUT_ACTION!');
         return $self;
     }
 
-    $self->logger()->trace('Doing bulk with arguments: '. Dumper $wf_args) if $self->logger->is_trace;
+    $self->log->trace('Doing bulk with arguments: '. Dumper $wf_args) if $self->log->is_trace;
 
     # wf_token is also used as name of the form field
-    my @serials = $self->multi_param($wf_token);
+    my @serials = $self->multi_param($wf_args->{selection_field});
 
     my @success; # list of wf_info results
     my $errors; # hash with wf_id => error
@@ -528,7 +509,7 @@ sub action_bulk {
     } elsif ($wf_args->{wf_action} =~ m{\w+_\w+}) {
         $command = 'execute_workflow_activity';
         $params{activity} = $wf_args->{wf_action};
-        $params{params} = %{$wf_args->{params}} if ($wf_args->{params});
+        $params{params} = $wf_args->{params} if $wf_args->{params};
     }
     # run in background
     $params{async} = 1 if ($wf_args->{async});
@@ -539,9 +520,8 @@ sub action_bulk {
         return $self;
     }
 
-    $self->logger()->debug("Run command $command on workflows " . join(", ", @serials));
-
-    $self->logger()->trace('Execute parameters ' . Dumper \%params) if ($self->logger()->is_trace);
+    $self->log->debug("Run command '$command' on workflows " . join(", ", @serials));
+    $self->log->trace('Execute parameters ' . Dumper \%params) if $self->log->is_trace;
 
     foreach my $id (@serials) {
 
@@ -557,7 +537,7 @@ sub action_bulk {
             $errors->{$id} = $self->status->is_set ? $self->status->message : 'I18N_OPENXPKI_UI_APPLICATION_ERROR';
         } else {
             push @success, $wf_info;
-            $self->logger()->trace('Result on '.$id.': '. Dumper $wf_info) if $self->logger->is_trace;
+            $self->log->trace('Result on '.$id.': '. Dumper $wf_info) if $self->log->is_trace;
         }
     }
 
@@ -571,7 +551,7 @@ sub action_bulk {
         $self->status->error('I18N_OPENXPKI_UI_WORKFLOW_BULK_RESULT_HAS_FAILED_ITEMS_STATUS');
 
         my @failed_id = keys %{$errors};
-        my $failed_result = $self->send_command_v2( 'search_workflow_instances', { id => \@failed_id, $self->__tenant() } );
+        my $failed_result = $self->send_command_v2( 'search_workflow_instances', { id => \@failed_id, $self->__tenant_param() } );
 
         my @result_failed = $self->__render_result_list( $failed_result, $self->__default_grid_row );
 
@@ -583,7 +563,7 @@ sub action_bulk {
             $_->[ $pos_state ] = $errors->{$serial};
         } @result_failed;
 
-        $self->logger()->trace('Mangled failed result: '. Dumper \@result_failed) if $self->logger->is_trace;
+        $self->log->trace('Mangled failed result: '. Dumper \@result_failed) if $self->log->is_trace;
 
         my @fault_head = @{$self->__default_grid_head};
         $fault_head[$pos_state] = { sTitle => 'Error' };
@@ -595,7 +575,7 @@ sub action_bulk {
                 label => 'I18N_OPENXPKI_UI_WORKFLOW_BULK_RESULT_FAILED_ITEMS_LABEL',
                 description => 'I18N_OPENXPKI_UI_WORKFLOW_BULK_RESULT_FAILED_ITEMS_DESC',
                 actions => [{
-                    path => 'workflow!info!wf_id!{serial}',
+                    page => 'workflow!info!wf_id!{serial}',
                     label => 'I18N_OPENXPKI_UI_WORKFLOW_OPEN_WORKFLOW_LABEL',
                     icon => 'view',
                     target => 'popup',
@@ -622,7 +602,7 @@ sub action_bulk {
                     'I18N_OPENXPKI_UI_WORKFLOW_BULK_RESULT_ASYNC_ITEMS_DESC' :
                     'I18N_OPENXPKI_UI_WORKFLOW_BULK_RESULT_SUCCESS_ITEMS_DESC',
                 actions => [{
-                    path => 'workflow!info!wf_id!{serial}',
+                    page => 'workflow!info!wf_id!{serial}',
                     label => 'I18N_OPENXPKI_UI_WORKFLOW_OPEN_WORKFLOW_LABEL',
                     icon => 'view',
                     target => 'popup',
@@ -636,9 +616,9 @@ sub action_bulk {
 
     # persist the selected ids and add button to recheck the status
     my $queryid = $self->__save_query({
-        'type' => 'workflow',
-        'count' => scalar @serials,
-        'query' => { id => \@serials },
+        pagename => 'workflow',
+        count => scalar @serials,
+        query => { id => \@serials },
     });
 
     $self->main->add_section({
@@ -646,7 +626,7 @@ sub action_bulk {
         content => {
             buttons => [{
                 label => 'I18N_OPENXPKI_UI_WORKFLOW_BULK_RECHECK_BUTTON',
-                page => 'redirect!workflow!result!id!' .$queryid,
+                page => "redirect!workflow!result!id!${queryid}",
                 format => 'expected',
             }]
         }
@@ -671,17 +651,151 @@ sub __check_for_validation_error {
         my $validator_msg = $reply->{'ERROR'}->{LABEL};
         my $field_errors = $reply->{'ERROR'}->{ERRORS};
         if (ref $field_errors eq 'ARRAY') {
-            $self->logger()->info('Input validation error on fields '.
+            $self->log->info('Input validation error on fields '.
                 join(",", map { ref $_ ? $_->{name} : $_ } @{$field_errors}));
         } else {
-            $self->logger()->info('Input validation error');
+            $self->log->info('Input validation error');
         }
         $self->status->error($validator_msg);
         $self->status->field_errors($field_errors);
-        $self->logger()->trace('validation details' . Dumper $field_errors ) if $self->logger->is_trace;
+        $self->log->trace('validation details' . Dumper $field_errors ) if $self->log->is_trace;
         return $field_errors;
     }
     return;
+}
+
+=head2 __request_values_for_fields
+
+Returns a I<HashRef> with field names and their values.
+
+The given list determines the accepted input fields, values originate from
+the request and are queried via L<OpenXPKI::Client::UI::Result/multi_param>.
+
+There is a special treatment for dependent fields: they are not part of the
+$fields list but extracted from C<$field-E<gt>{options}-E<gt>[x]-E<gt>{dependants}>
+and added to the processing queue.
+
+B<Positional parameters>
+
+=over
+
+=item * C<$fields> I<ArrayRef> - list of field specifications as returned by
+L<OpenXPKI::Client::UI::Workflow/__render_input_field>
+
+=back
+
+=cut
+sub __request_values_for_fields {
+    my $self = shift;
+    my $fields = shift;
+    my $result = {};
+
+    my @fields = $fields->@*; # clone
+    while (my $field = shift @fields) {
+        my $name = $field->{name};
+
+        if ($name =~ m{ \[\] \z }xms) {
+            $self->log->warn("Received field name '$name' with deprecated square brackets");
+            $name = substr($name,0,-2);
+        }
+        next if $name =~ m{ \A wf_ }xms;
+
+        #
+        # Fetch field value(s)
+        #
+        my @v_list = $self->multi_param($name);
+        if (not $field->{clonable} and (my $amount = scalar @v_list) > 1) {
+            $self->log->warn(sprintf "Received %s values for non-clonable field '%s': using first value and ignoring the rest", scalar @v_list, $name);
+            splice @v_list, 1;
+        }
+
+        # validate values of non-editable select fields
+        if ('select' eq $field->{type} and not $field->{editable}) {
+            my @options = map { $_->{value} } ($field->{options}//[])->@*;
+            for my $val (@v_list) {
+                if (not any { $val eq $_ } @options) {
+                    $self->log->warn(sprintf "Ignoring %s field '%s': value '%s' does not match any known option", $field->{type}, $name, $val);
+                    next; # ignore value
+                }
+            }
+        }
+
+        # validate values of static fields
+        if ('static' eq $field->{type} or 'hidden' eq $field->{type}) {
+            for my $val (@v_list) {
+                if (($val//'') ne ($field->{value}//'')) {
+                    $self->log->warn(sprintf "Ignoring %s field '%s': value was altered by frontend", $field->{type}, $name);
+                    next; # ignore value
+                }
+            }
+        }
+
+        # add dependent fields of currently selected option to the queue
+        my @dependants = $self->__get_dependants($field, $v_list[0]);
+        push @fields, @dependants;
+
+        if (scalar @dependants and 'select' eq $field->{type} and $field->{clonable}) {
+            $self->log->warn(sprintf "Field '%s': clonable fields of type 'select' with dependants are not supported", $name);
+        }
+
+        my $vv = $field->{clonable} ? \@v_list : $v_list[0];
+
+        # build nested HashRef for cert profile field name including sub item
+        # (e.g. "cert_info{requestor_email}") - search tag: #wf_fields_with_sub_items
+        if ($name =~ m{ \A (\w+)\{(\w+)\} \z }xs) {
+            $result->{$1}->{$2} = $vv;
+        # plain field name
+        } else {
+            $result->{$name} = $vv;
+        }
+
+    }
+
+    return $result;
+}
+
+=head2 __get_dependants
+
+Returns a list with field definitions of all dependent fields of the given
+E<lt>selectE<gt> field.
+
+If C<$option> is specified then only the dependent fields of the option with
+that value are returned (if any). Otherwise all dependent fields of all options
+are returned.
+
+B<Positional parameters>
+
+=over
+
+=item * C<$field> I<HashRef> - field specification as returned by
+L<OpenXPKI::Client::UI::Workflow/__render_input_field>.
+
+=item * C<$option> I<Str> - value of the the option whose dependants shall be
+returned. Optional.
+
+=back
+
+=cut
+signature_for __get_dependants => (
+    method => 1,
+    positional => [
+        'HashRef',
+        'Str|Undef',
+    ],
+);
+sub __get_dependants ($self, $field, $option) {
+    my @dependants;
+
+    if ('select' eq $field->{type}) {
+        for my $opt (($field->{options}//[])->@*) {
+            next unless ($option//'') eq $opt->{value};
+            if (my $deps = $opt->{dependants}) {
+                push @dependants, $deps->@*;
+            }
+        }
+    }
+
+    return @dependants;
 }
 
 __PACKAGE__->meta->make_immutable;

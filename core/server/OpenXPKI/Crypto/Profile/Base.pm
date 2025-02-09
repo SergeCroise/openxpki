@@ -534,6 +534,17 @@ sub has_extension
 
 }
 
+sub set_padding {
+    my $self = shift;
+    $self->{PROFILE}->{PADDING} = shift;
+    return 1;
+}
+
+sub get_padding {
+    my $self = shift;
+    return $self->{PROFILE}->{PADDING};
+}
+
 sub set_serial
 {
     my $self = shift;
@@ -681,11 +692,18 @@ sub process_templates {
 
     my %template_vars = (
         'ISSUER' => $issuer_info,
+        # TODO - deprecate the old structure
         'CAALIAS' => {
             'ALIAS' => $self->{CA},
             'GROUP' => $group,
             'GENERATION' => $generation,
         },
+        # We use the same template for key name generation but do not
+        # have the CAALIAS prefix there. To make the consistent we add
+        # this also on top level now and deprecate the old format
+        'ALIAS' => $self->{CA},
+        'GROUP' => $group,
+        'GENERATION' => $generation,
         'PKI_REALM' => CTX('api2')->get_pki_realm(),
     );
     ##! 32: ' Template Vars ' . Dumper ( %template_vars )

@@ -39,7 +39,7 @@ sub evaluate {
     # eval
     no warnings 'uninitialized';
     my $rv = eval $to_eval;
-    use warnings;
+    use warnings 'uninitialized';
 
     CTX('log')->workflow->warn("Error while evaluating condition '$to_eval': $EVAL_ERROR") if $EVAL_ERROR;
     CTX('log')->workflow->warn("Warning while evaluating condition '$to_eval': $warnings") if $warnings;
@@ -59,15 +59,19 @@ __END__
 
 =head1 NAME
 
-OpenXPKI::Workflow::Condition::Evaluate - Inline condition that evaluates perl
-code for truth
+OpenXPKI::Server::Workflow::Condition::Evaluate
 
 =head1 DESCRIPTION
+
+Inline condition that evaluates Perl code for truth.
 
 This is a copy of L<Workflow::Condition::Evaluate> that replaces the use of
 the L<Safe> module with a simple C<eval>.
 
 The L<Safe> module has a long standing bug messing up C<%SIG> handlers, see
 L<https://rt.cpan.org/Public/Bug/Display.html?id=112092>.
+
+Please note that this condition will automatically be used as a replacement
+if you specify C<Workflow::Condition::Evaluate> in a workflow.
 
 =cut

@@ -22,13 +22,20 @@ The general configuration block looks like::
         driver:
             LongReadLen: 10000000
 
-OpenXPKI supports MySQL, PostgreSQL, Oracle and DB2.
+OpenXPKI supports MariaDB (MySQL), PostgreSQL and Oracle.
 The *namespace* parameter is used only by the Oracle driver.
-DB2 uses only the *name* parameter and reads other settings from the environment,
-which are passed as a key/value list below the *environment* key.
 Options given to ``driver`` are passed to DBI as extra parameters.
 
 Check perldoc OpenXPKI::Server::Database::Driver::<type> for more info on the parameters.
+
+The recommended driver is ``MariaDB2`` which uses the perl MariaDB driver module while
+``MariaDB`` internally uses the old ``mysql`` driver of perl. Depending on the OS and perl
+version used this might just be an alias but we have also seen very strange issues here.
+*Note:* It looks like the DBD::MariaDB module shipped with bookworm has an issue with reference
+counters leading to very messy log output and **might** also have implications on security or
+system stability - we therefore recommend to stick with the ``MariaDB`` module in combination
+with the old ``libdbd-mysql-perl`` driver.
+
 
 System
 -----------------------
@@ -82,9 +89,6 @@ The transport setting is reserved for future use, leave it untouched.
         Default:
             enabled: 1
             timeout: 120
-
-        SCEP:
-            enabled: 1
 
 The *service* block lists all services to be enabled, the key is the name of the service, the *enabled* key is supported by all services, for all other parameters consult the concrete service documentation (perldoc OpenXPKI::Service::<ServiceName>).
 
@@ -146,17 +150,6 @@ Crypto layer (global)
 ---------------------
 Define several parameters for the basic crypto tools.
 
-**api settings**
-
-You should not need to touch this unless you are developing your own crypto classes. ::
-
-    tokenapi:
-        certsign:      OpenXPKI::Crypto::Backend::API
-        datasafe:      OpenXPKI::Crypto::Backend::API
-        scep:          OpenXPKI::Crypto::Tool::SCEP::API
-
-The setting denotes the name of the perl module used as backend class when using a token of the given class. Default tokens are *certsign*, is used for all ca operations,  and *datasafe*, used to internally´ encrypt data. Any tokens that are not defined here, use *OpenXPKI::Crypto::Backend::API* by default. If you run a scep server, you must add the line for the scep module, as it does not work with the default.
-
 **configuration of the default tokens**
 
 ::
@@ -176,10 +169,6 @@ The setting denotes the name of the perl module used as backend class when using
 
             # random file to use for OpenSSL
             randfile: /var/openxpki/rand
-
-        pkcs7:
-            backend: OpenXPKI::Crypto::Tool::PKCS7
-            api: OpenXPKI::Crypto::Tool::PKCS7::API
 
         javaks:
             backend: OpenXPKI::Crypto::Tool::CreateJavaKeystore

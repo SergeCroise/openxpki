@@ -11,7 +11,6 @@ use Carp qw( croak carp );
 use Scalar::Util qw( blessed );
 
 # CPAN modules
-use Try::Tiny;
 use Workflow::Exception qw( workflow_error );
 
 # Project modules
@@ -20,9 +19,14 @@ use OpenXPKI::Exception;
 use OpenXPKI::Debug;
 use OpenXPKI::Serialization::Simple;
 use OpenXPKI::DateTime;
+use OpenXPKI::Util;
+
+# Feature::Compat::Try should be done last to safely disable warnings
+use Feature::Compat::Try;
+
 
 my @PERSISTENT_FIELDS = qw( proc_state count_try wakeup_at reap_at archive_at );
-my @TRANSIENT_FIELDS = qw( persist_context is_startup );
+my @TRANSIENT_FIELDS = qw( persist_context is_startup created_at );
 __PACKAGE__->mk_accessors( @PERSISTENT_FIELDS, @TRANSIENT_FIELDS );
 
 
@@ -67,7 +71,7 @@ my %known_proc_states = (
         hook => 'none',
         enforceable => [ 'fail', 'reset' ],
     },
-    # action stops regulary
+    # action stops regularly
     manual => {
         hook => 'none',
         enforceable => [ 'fail' ],
@@ -135,6 +139,7 @@ sub init {
         }
     } else {
         $self->is_startup(1);
+        $self->created_at(time);
     }
 
     # The condition cache bug also affects the get_action_fields method
@@ -169,17 +174,6 @@ sub execute_action {
 
     try {
         $self->persist_context(1);
-
-        # The workflow module internally caches conditions and does NOT clear
-        # this cache if you just refetch a workflow! As the workflow state
-        # object is shares, this leads to wrong states in the condition cache
-        # if you reopen two different workflows in the same state!
-        my $wf_state = $self->_get_workflow_state();
-
-        ##! 16: 'Clear cache for state ' . $wf_state->state
-        $wf_state->clear_condition_cache();
-
-        ##! 128: 'state object cond. cache ' . Dumper $wf_state->{_condition_result_cache}
 
         #set "reap at" info
         my $action = $self->_get_action($action_name);
@@ -216,14 +210,14 @@ sub execute_action {
         }
     }
     # catch exceptions during initialization to do database rollback
-    catch {
+    catch ($err) {
         ##! 8: 'Error during startup ' . $_
         # make sure the cleanup code does not die as this would escape this method
         eval { CTX('dbi')->rollback() unless $autorun };
         # $autorun = 1 means nested workflow action, rollback will then be
         # performed on a higher level by code further down
-        die $_; # rethrow
-    };
+        die $err; # rethrow
+    }
 
     CTX('log')->application()->debug("Execute action $action_name");
 
@@ -250,6 +244,8 @@ sub execute_action {
     # so we just ignore any expcetions here
     if ($self->_has_paused()) {
         ##! 16: 'action paused'
+        CTX('metrics')->inc(workflow_state_count =>  { type => $self->type, state => 'paused' });
+
     } elsif ( $EVAL_ERROR ) {
 
         my $error = $EVAL_ERROR;
@@ -281,6 +277,7 @@ sub execute_action {
         # workflow engine makes recursive calls, rethrow the first exception
         # instead of cascading them
 
+        CTX('metrics')->inc(workflow_state_count =>  {  type => $self->type, state => 'exception' });
         $e = OpenXPKI::Exception->caught();
         if ( (ref $e eq 'OpenXPKI::Exception') &&
             ( $e->message_code() eq 'I18N_OPENXPKI_SERVER_WORKFLOW_ERROR_ON_EXECUTE') ) {
@@ -336,6 +333,17 @@ sub execute_action {
             $self->_set_proc_state('manual');
         } else {
             $self->_set_proc_state('finished');
+            # try to calculate the runtime
+            if ($self->id && CTX('metrics')->do_workflow_metrics) {
+                my $startup = $self->get_startup_time();
+                my $runtime = $startup ? (time - $startup) : 0;
+                my $labels = {
+                    type => $self->type,
+                    state => $self->state,
+                    id => $self->id,
+                };
+                CTX('metrics')->set('workflow_runtime_seconds' => $runtime, $labels, time()*1000);
+            }
         }
     }
 
@@ -472,7 +480,7 @@ sub pause {
         });
         $self->_set_proc_state('pause');#saves wf data
 
-        CTX('log')->application()->info("Action ".$self->{_CURRENT_ACTION}." paused ($cause_description), wakeup $dt_wakeup_at");
+        CTX('log')->application->info(sprintf("Action '%s' paused (%s), wakeup %s", $self->{_CURRENT_ACTION}, $cause_description, $dt_wakeup_at));
     }
 
 }
@@ -608,7 +616,7 @@ sub get_global_actions {
     my ($self) = @_;
 
     # Volatile workflows do not have any actions
-    return [] if $self->id < 1;
+    return [] unless OpenXPKI::Util->is_regular_workflow($self->id);
 
     my $role = CTX('session')->data->role || 'Anonymous';
 
@@ -630,6 +638,40 @@ sub get_global_actions {
 
     ##! 16: 'allowed actions: ' . join(', ', @allowed)
     return \@allowed;
+}
+
+
+=head2 get_startup_time
+
+Try to get the startup time for this workflow, this works only if the
+workflow ran within one step or uses the "History" persister
+
+=cut
+
+sub get_startup_time {
+
+    my $self = shift;
+
+    # if the workflow was "one shot" we have the startup time in the instance
+    my $startup = $self->created_at();
+
+    return $startup if ($startup);
+
+    return unless ($self->id);
+
+    # TODO - this duplicates code from the Persister / API
+    $startup = CTX('dbi')->select_value(
+        from => 'workflow_history',
+        columns => [ 'workflow_history_date' ],
+        where => { workflow_id => $self->id },
+        order_by => [ 'workflow_history_date' ],
+        limit => 1,
+    );
+
+    return unless ($startup);
+    # convert db timestamp to unixtime
+    return OpenXPKI::DateTime::parse_date_utc($startup)->epoch();
+
 }
 
 sub _handle_proc_state {
@@ -883,7 +925,7 @@ sub _fail {
     }
 }
 
-sub is_running(){
+sub is_running {
     my $self = shift;
     return ( $self->proc_state eq 'running');
 }
@@ -898,7 +940,7 @@ sub _get_next_state {
 
     if ( $self->_has_paused() ) {
         my $state = Workflow->NO_CHANGE_VALUE;
-        my $msg = sprintf( 'Workflow %d, Action %s has paused, return %s', $self->id, $action_name, $state );
+        my $msg = sprintf( 'Workflow #%s, Action %s has paused, return %s', $self->id, $action_name, $state );
         ##! 16: $msg
 
         return $state;

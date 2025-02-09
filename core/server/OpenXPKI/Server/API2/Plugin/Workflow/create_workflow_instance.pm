@@ -1,5 +1,5 @@
 package OpenXPKI::Server::API2::Plugin::Workflow::create_workflow_instance;
-use OpenXPKI::Server::API2::EasyPlugin;
+use OpenXPKI -plugin;
 
 =head1 NAME
 
@@ -14,7 +14,7 @@ use Scalar::Util 'blessed';
 use OpenXPKI::DateTime;
 use OpenXPKI::Debug;
 use OpenXPKI::Server::Context qw( CTX );
-use OpenXPKI::Server::API2::Types;
+use OpenXPKI::Types;
 use OpenXPKI::Server::API2::Plugin::Workflow::Util;
 with 'OpenXPKI::Server::API2::TenantRole';
 
@@ -90,7 +90,7 @@ The namespace has a default of I<workflow.lock>, so if you dont need to
 modify neither namespace or error handling you can directly pass the locks
 key as String instead of using a HashRef.
 
-=item * C<tenant> I<Str>. Optional
+=item * C<tenant> L<Tenant|OpenXPKI::Types/Tenant> - tenant. Optional
 
 Assign the new workflow to the given tenant. The value must be a valid
 tenant for the current session user, if it is not given and tenant mode
@@ -103,6 +103,9 @@ Execute the workflow with the permissions of the system role, disables
 validation or autodiscovery of the tenant.
 
 =back
+
+B<Returns> a I<HashRef> with workflow information, see
+L<get_workflow_info|OpenXPKI::Server::API2::Plugin::Workflow::get_workflow_info/get_workflow_info> for more details.
 
 =cut
 command "create_workflow_instance" => {
@@ -141,7 +144,7 @@ command "create_workflow_instance" => {
         $tenant = $self->get_validated_tenant( $params->tenant );
         $workflow = CTX('workflow_factory')->get_factory->create_workflow($type);
     }
-    ##! 32: "Tenant $tenant"
+    ##! 32: 'Tenant ' . $tenant//'<undef>'
 
     OpenXPKI::Exception->throw (
         message => "Could not initialize workflow",
@@ -169,9 +172,10 @@ command "create_workflow_instance" => {
     my $creator = CTX('session')->data->user;
 
     # workflow_id is a virtual key that is added by the Context on init so
-    # it does not exist in the fresh context after creation, fixes #442
-    # we set it directly to prevent triggering any "on update" methods
-    $context->{PARAMS}{'workflow_id'} = $id;
+    # it does not exist in the fresh context after creation, fixes #442.
+    # We set it directly to prevent triggering any "on update" methods.
+    # Only set this on non-volatile workflows (numeric ids).
+    $context->{PARAMS}{'workflow_id'} = $id if OpenXPKI::Util->is_regular_workflow($id);
 
     # same for creator
     $context->{PARAMS}{'creator'} = $creator;
@@ -327,7 +331,7 @@ sub _handle_lock {
             ($expiry ? (expiration_date => $expiry): ()),
         );
         ##! 32: 'Lock was created'
-        CTX('log')->workflow->info(sprintf "Lock for workflow #%01d was created with %s/%s", $id, $namespace, $key);
+        CTX('log')->workflow->info(sprintf "Lock for workflow #%s was created with %s/%s", $id, $namespace, $key);
     };
     if ($EVAL_ERROR) {
         ##! 8: 'Error creating lock ' . $EVAL_ERROR

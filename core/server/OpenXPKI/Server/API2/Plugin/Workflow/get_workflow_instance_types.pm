@@ -1,5 +1,5 @@
 package OpenXPKI::Server::API2::Plugin::Workflow::get_workflow_instance_types;
-use OpenXPKI::Server::API2::EasyPlugin;
+use OpenXPKI -plugin;
 
 =head1 NAME
 
@@ -9,7 +9,7 @@ OpenXPKI::Server::API2::Plugin::Workflow::get_workflow_instance_types
 
 # Project modules
 use OpenXPKI::Server::Context qw( CTX );
-use OpenXPKI::Server::API2::Types;
+use OpenXPKI::Types;
 
 
 

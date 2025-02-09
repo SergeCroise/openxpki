@@ -1,5 +1,5 @@
 package OpenXPKI::Server::API2::Plugin::Secret::clear_secret;
-use OpenXPKI::Server::API2::EasyPlugin;
+use OpenXPKI -plugin;
 
 =head1 NAME
 
@@ -9,7 +9,7 @@ OpenXPKI::Server::API2::Plugin::Secret::clear_secret
 
 # Project modules
 use OpenXPKI::Server::Context qw( CTX );
-use OpenXPKI::Server::API2::Types;
+use OpenXPKI::Types;
 
 
 

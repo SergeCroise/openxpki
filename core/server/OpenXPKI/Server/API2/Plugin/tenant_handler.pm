@@ -1,5 +1,5 @@
 package OpenXPKI::Server::API2::Plugin::tenant_handler;
-use OpenXPKI::Server::API2::EasyPlugin;
+use OpenXPKI -plugin;
 
 =head1 NAME
 
@@ -11,7 +11,7 @@ OpenXPKI::Server::API2::Plugin::tenant_handler
 # Project modules
 use OpenXPKI::Debug;
 use OpenXPKI::Server::Context qw( CTX );
-use OpenXPKI::Server::API2::Types;
+use OpenXPKI::Types;
 
 
 =head1 COMMANDS
@@ -20,33 +20,34 @@ use OpenXPKI::Server::API2::Types;
 
 Check if the given tenant can be accessed by the current session user.
 
-Return a literal 0 or 1 weather the user is allowed. Returns undef if a
+Return a literal 0 or 1 whether the user is allowed. Returns undef if a
 tenant was given but the current user has no tenant handler set.
 
 B<Parameters>
 
 =over
 
-=item * C<tenant> I<Str>
+=item * C<tenant> L<Tenant|OpenXPKI::Types/Tenant> - tenant
 
 =back
 
 =cut
 command "can_access_tenant" => {
-    tenant => { isa => 'Str', required => 1, },
+    tenant => { isa => 'Tenant', required => 1, },
 } => sub {
     my ($self, $params) = @_;
 
     my $handler = CTX('authentication')->tenant_handler();
 
-    return $handler->check_access( CTX('session')->data->tenants, $params->tenant ) if ($handler);
+    if ($handler) {
+        return $handler->check_access( CTX('session')->data->tenants, $params->tenant );
+    } else {
+        # if no handler is set, the empty tenant "" (or "0") is allowed
+        return 1 unless $params->tenant;
 
-    # if no handler is set, the empty tenant is allowed
-    return 1 unless($params->tenant);
-
-    # no handler is set, return undef to indicate missing evaluation
-    return unless($handler);
-
+        # return undef to indicate missing evaluation
+        return;
+    }
 };
 
 =head2 get_primary_tenant

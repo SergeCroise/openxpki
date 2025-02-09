@@ -8,7 +8,7 @@ use FindBin qw( $Bin );
 
 # CPAN modules
 use Test::More;
-use Test::Deep;
+use Test::Deep ':v1';
 use Test::Exception;
 
 # Project modules
@@ -51,16 +51,16 @@ lives_and {
         # actions are defined in config/config.d/realm/democa/uicontrol/_default.yaml,
         # they must exist and "User" must be defined in their "acl" section as creator
         workflow => superbagof(
-            {
+            superhashof({
                 'label' => 'I18N_OPENXPKI_UI_DOWNLOAD_PRIVATE_KEY',
                 'workflow' => 'certificate_privkey_export',
-            },
-            {
+            }),
+            superhashof({
                 'label' => 'I18N_OPENXPKI_UI_CERT_ACTION_REVOKE',
                 'workflow' => 'certificate_revocation_request_v2',
-            },
+            }),
         ),
-    });
+    }) or diag explain $result;
 } "query actions for certificate (role 'User')";
 
 # check certificate owner:

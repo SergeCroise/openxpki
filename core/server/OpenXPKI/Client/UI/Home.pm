@@ -19,21 +19,21 @@ sub init_welcome {
     my $args = shift;
 
     # check for redirect
-    my $redirect = $self->_client->session()->param('redirect') || '';
-    $self->_client->session()->param('redirect','');
+    my $redirect = $self->session_param('redirect') || '';
+    $self->session_param('redirect','');
     if ($redirect =~ /welcome/) {
         # redirect to myself causes the UI to loop
         $redirect = "";
     }
 
     if ($redirect) {
-        $self->logger()->debug('Found redirect - redirecting user to ' . $redirect);
+        $self->log->debug('Found redirect - redirecting user to ' . $redirect);
         $self->redirect->to($redirect);
     } else {
         # check if there are custom landmarks for this user
-        my $landmark = $self->_client->session()->param('landmark');
+        my $landmark = $self->session_param('landmark');
         if ($landmark && $landmark->{welcome}) {
-            $self->logger()->debug('Found welcome landmark - redirecting user to ' . $landmark->{welcome});
+            $self->log->debug('Found welcome landmark - redirecting user to ' . $landmark->{welcome});
             $self->redirect->to($landmark->{welcome});
         } else {
             $self->init_index();

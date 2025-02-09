@@ -3,15 +3,23 @@ use Moose;
 
 # Core modules
 use English;
-use Try::Tiny;
+
+# CPAN modules
+use Type::Params qw( signature_for );
 
 # Project modules
 use OpenXPKI::Server;
 use OpenXPKI::Server::Context qw( CTX );
 use OpenXPKI::Connector::WorkflowContext;
-use OpenXPKI::MooseParams;
 use OpenXPKI::Debug;
 use OpenXPKI::Serialization::Simple;
+
+# Feature::Compat::Try should be done last to safely disable warnings
+use Feature::Compat::Try;
+
+# should be done after imports to safely disable warnings in Perl < 5.36
+use experimental 'signatures';
+
 
 has factory => (
     is => 'rw',
@@ -158,15 +166,15 @@ sub _execute_activity_sync {
 
     my $log = CTX('log')->workflow;
 
-    OpenXPKI::Server::__set_process_name("workflow: id %d", $workflow->id());
+    OpenXPKI::Server::__set_process_name("workflow: id %s", $workflow->id);
     # run activity
     eval { $self->_run_activity($workflow, $activity) };
 
     if (my $eval_err = $EVAL_ERROR) {
-       $log->error(sprintf ("Error executing workflow activity '%s' on workflow id %01d (type %s): %s",
-            $activity, $workflow->id(), $workflow->type(), $eval_err));
+       $log->error(sprintf ('Error executing workflow activity "%s" on workflow id #%s (type "%s"): %s',
+            $activity, $workflow->id, $workflow->type, $eval_err));
 
-        OpenXPKI::Server::__set_process_name("workflow: id %d (exception)", $workflow->id());
+        OpenXPKI::Server::__set_process_name("workflow: id %s (exception)", $workflow->id);
 
         my $logcfg = { priority => 'error', facility => 'workflow' };
 
@@ -212,7 +220,7 @@ sub _execute_activity_sync {
         );
     };
 
-    OpenXPKI::Server::__set_process_name("workflow: id %d (cleanup)", $workflow->id());
+    OpenXPKI::Server::__set_process_name("workflow: id %s (cleanup)", $workflow->id());
     return 0;
 }
 
@@ -263,7 +271,7 @@ sub _execute_activity_async {
 
         ##! 16: 'I am the child process running the activity'
         # append fork info to process name
-        OpenXPKI::Server::__set_process_name("workflow: id %d (detached)", $workflow->id());
+        OpenXPKI::Server::__set_process_name("workflow: id %s (detached)", $workflow->id());
 
         # create memory-only session for workflow if it's not already one
         if (CTX('session')->type ne 'Memory') {
@@ -282,16 +290,19 @@ sub _execute_activity_async {
 
         # DB commits are done inside the workflow engine
     }
-    catch {
-        # make OpenXPKI::Exception compatible with Try::Tiny
-        local $@ = $_;
-        # make sure the cleanup code does not die as this would escape this method
-        eval { CTX('log')->system->error($_) };
+    catch ($err) {
+        # make sure the error handler code does not die as this would escape this method
+        eval { CTX('log')->system->error($err) };
         # DB rollback is not needed as this process will terminate now anyway
-    };
+    }
 
-    eval { CTX('dbi')->disconnect };
-    eval { CTX('config')->cleanup() };
+    OpenXPKI::Server::__set_process_name("workflow: id %s (detached - cleanup)", $workflow->id());
+
+    try {
+        OpenXPKI::Server->cleanup();
+    }
+    catch ($err) { warn $err }
+
     ##! 16: 'Backgrounded workflow finished - exit child'
     exit;
 }
@@ -302,6 +313,9 @@ sub _run_activity {
     ##! 8: 'start'
 
     my $log = CTX('log')->workflow;
+
+    my $metric_id = CTX('metrics')->start('workflow_action_seconds',
+        { type => $wf->type, state => $wf->state, action => $ac }) if CTX('metrics')->do_histogram_metrics;
 
     # This is a hack to handle simple "autorun" actions which we use to
     # create a bypass around optional actions
@@ -329,6 +343,9 @@ sub _run_activity {
             $ac = $action[0];
         }
     } while($ac);
+
+    CTX('metrics')->stop($metric_id) if CTX('metrics')->do_histogram_metrics;
+
 }
 
 =head2 get_wf_info
@@ -388,30 +405,36 @@ workflow actions and state
 =back
 
 =cut
-sub get_wf_info {
-    my ($self, %args) = named_args(\@_,   # OpenXPKI::MooseParams
-        id        => { isa => 'Int',  optional => 1 },
-        workflow  => { isa => 'OpenXPKI::Server::Workflow', optional => 1 },
-        activity  => { isa => 'Str',  optional => 1, },
-        with_attributes => { isa => 'Bool', optional => 1, default => 0 },
-        with_ui_info => { isa => 'Bool', optional => 1, default => 0 },
-    );
+signature_for get_wf_info => (
+    method => 1,
+    named => [
+        id              => 'Optional[ Int ]',
+        workflow        => 'Optional[ OpenXPKI::Server::Workflow ]',
+        activity        => 'Optional[ Str ]',
+        with_attributes => 'Optional[ Bool ]', { default => 0 },
+        with_ui_info    => 'Optional[ Bool ]', { default => 0 },
+    ],
+);
+sub get_wf_info ($self, $arg) {
     ##! 2: 'start'
 
-    die "Please specify either 'id' or 'workflow'" unless ($args{id} or $args{workflow});
+    die "Please specify either 'id' or 'workflow'" unless ($arg->id or $arg->workflow);
 
-    my $workflow = $args{workflow}
-        ? $args{workflow}
-        : CTX('workflow_factory')->get_workflow({ ID => $args{id} });
+    my $workflow = $arg->workflow
+        ? $arg->workflow
+        : CTX('workflow_factory')->get_workflow({ ID => $arg->id });
 
     ##! 2: 'workflow type = ' . $workflow->type
 
     my $head = CTX('config')->get_hash([ 'workflow', 'def', $workflow->type, 'head' ]);
 
+    # enforce numeric workflow ID (Perl's internal flag) for correct JSON encoding
+    my $id = $workflow->id; $id+=0 if ($id and $id =~ /^\d+$/);
+
     my $basic_wf_info = {
         workflow => {
             type        => $workflow->type,
-            id          => $workflow->id,
+            id          => $id,
             state       => $workflow->state,
             description => $head->{description},
             label       => $head->{label},
@@ -423,19 +446,19 @@ sub get_wf_info {
             reap_at     => $workflow->reap_at,
             archive_at  => $workflow->archive_at,
             context     => { %{$workflow->context->param } }, # make a copy
-            $args{with_attributes} ? ( attribute => $workflow->attrib ) : (),
+            $arg->with_attributes ? ( attribute => $workflow->attrib ) : (),
         }
     };
 
-    ##! 64: Dumper($basic_wf_info) unless $args{with_ui_info}
+    ##! 64: Dumper($basic_wf_info) unless $arg->with_ui_info
 
-    return $basic_wf_info unless $args{with_ui_info};
+    return $basic_wf_info unless $arg->with_ui_info;
 
     my $action_state_info = $self->factory->get_action_and_state_info(
         $workflow->type,
         $workflow->state,
         # fetch actions of current state (or use given action):
-        [ $args{activity} ? $args{activity} : $workflow->get_current_actions() ],
+        [ $arg->activity ? $arg->activity : $workflow->get_current_actions() ],
         { %{$workflow->context->param } }, # make a copy
     );
 

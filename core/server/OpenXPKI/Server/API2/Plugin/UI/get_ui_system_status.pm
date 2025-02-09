@@ -1,5 +1,5 @@
 package OpenXPKI::Server::API2::Plugin::UI::get_ui_system_status;
-use OpenXPKI::Server::API2::EasyPlugin;
+use OpenXPKI -plugin;
 
 =head1 NAME
 
@@ -9,7 +9,7 @@ OpenXPKI::Server::API2::Plugin::UI::get_ui_system_status
 
 # Project modules
 use OpenXPKI::Server::Context qw( CTX );
-use OpenXPKI::Server::API2::Types;
+use OpenXPKI::Types;
 use Sys::Hostname;
 
 =head1 COMMANDS
@@ -73,6 +73,7 @@ command "get_ui_system_status" => {
         workflow        => scalar @{$pids->{workflow}},
         version         => $OpenXPKI::VERSION::VERSION,
         hostname        => hostname,
+        node_id         => CTX('config')->node_id,
         config          => $config
     };
 
@@ -93,7 +94,7 @@ command "get_ui_system_status" => {
                 notbefore => { '<', $now },
                 notafter => { '>', $now },
             },
-            group_by => ["identifier","profile"],
+            group_by => ["aliases.identifier","profile"],
             order_by => "latest_update",
         );
         $result->{crl_expiry} = $db_crl ? $db_crl->{latest_update} : 0;

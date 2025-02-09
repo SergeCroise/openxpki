@@ -25,6 +25,8 @@ sub execute {
     my $template = $self->param('template');
     my $private_key = $self->param('private_key') || '';
 
+    configuration_error('No cert_identifier given') unless($cert_identifier);
+
     my $target_key = $self->param('target_key') || 'certificate_export';
 
     my $encode = $self->param('base64');
@@ -209,6 +211,8 @@ Mandatory if the private key can not be found in the datapool.
 Only used in plain export mode (no template and no key export), defines
 the format of the certificate to be written into the target_key. The
 default is to export the PEM encoded certificate.
+
+For export modes with key see C<get_private_key_for_cert>.
 
 =over
 

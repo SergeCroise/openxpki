@@ -1,0 +1,30 @@
+<!-- components/oxi-section/form/field/text -->
+{{!-- template-lint-disable no-invalid-interactive --}}
+<div
+    {{on "keydown" this.onKeydown}}
+    {{on "mousedown" this.onMouseDown}}
+    class="dropdown"
+    role="none"
+>
+    <input
+        type="text"
+        class="form-control"
+        value={{this.value}}
+        placeholder={{@content.placeholder}}
+        required={{not @content.is_optional}}
+        {{on "input" this.onInput}}
+        {{on "focus" this.onFocus}}
+        {{on "blur" this.onBlur}}
+        {{on "paste" this.onPaste}}
+        {{on-init @setFocusInfo true}}
+    />
+    <div class="invalid-feedback">{{@error}}</div>
+
+    <div class="dropdown-menu {{if this.isDropdownOpen "show"}}" role="menu">
+        {{#each this.searchResults as |result|}}
+            <button class="dropdown-item {{if result.active "active"}}" type="button" {{on "click" (fn this.selectResult result)}} tabindex="-1">{{result.label}}</button>
+        {{else}}
+            <button class="dropdown-item" type="button" tabindex="-1">{{t 'component.oxifield_text.no_search_results'}}</button>
+        {{/each}}
+    </div>
+</div>

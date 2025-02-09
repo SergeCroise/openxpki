@@ -2,13 +2,19 @@ package OpenXPKI::Client::UI::Workflow::Init;
 use Moose;
 
 extends 'OpenXPKI::Client::UI::Workflow';
+with qw(
+    OpenXPKI::Client::UI::Role::QueryCache
+    OpenXPKI::Client::UI::Role::Pager
+);
 
 # Core modules
 use Data::Dumper;
+use Encode;
 
 # Project modules
 use OpenXPKI::DateTime;
 use OpenXPKI::i18n qw( i18nTokenizer i18nGettext );
+use OpenXPKI::Util;
 
 =head1 UI Methods
 
@@ -60,42 +66,37 @@ sub init_start {
     my $self = shift;
     my $args = shift;
 
-    my $params = $self->decrypted_param('__secure');
-    my $wf_type;
-    if ($params) {
-        $wf_type = $params->{'wf_type'};
-        delete $params->{'wf_type'};
-    } else {
-        $wf_type = $self->param('wf_type');
-    }
-
+    my $wf_type = $self->param('wf_type');
     if (!$wf_type) {
         # todo - handle errors
-        $self->logger()->error("No workflow given to init_start");
+        $self->log->error("No workflow given to init_start");
         return $self;
     }
 
     my $wf_info = $self->send_command_v2( 'create_workflow_instance', {
         workflow => $wf_type,
-        params => ($params // {}),
+        params => $self->secure_param('wf_params') // {},
         ui_info => 1,
-        $self->__tenant(),
+        $self->__tenant_param(),
     });
 
     if (!$wf_info) {
         # todo - handle errors
-        $self->logger()->error("Create workflow failed");
+        $self->log->error("Create workflow failed");
         return $self;
     }
 
-    $self->logger()->trace("wf info on create: " . Dumper $wf_info ) if $self->logger->is_trace;
+    $self->log->trace("wf info on create: " . Dumper $wf_info ) if $self->log->is_trace;
 
-    $self->logger()->info(sprintf "Create new workflow %s, got id %01d",  $wf_info->{workflow}->{type}, $wf_info->{workflow}->{id} );
+    my $wf_id = $wf_info->{workflow}->{id};
+    $self->log->info(sprintf "Create new workflow %s, got id %s",  $wf_info->{workflow}->{type}, $wf_id );
 
     # this duplicates code from action_index
-    if ($wf_info->{workflow}->{id} > 0 && !(grep { $_ =~ m{\A_} } keys %{$wf_info->{workflow}->{context}})) {
-
-        my $redirect = 'workflow!load!wf_id!'.$wf_info->{workflow}->{id};
+    if (
+        OpenXPKI::Util->is_regular_workflow($wf_id)
+        and not (grep { $_ =~ m{\A_} } keys %{$wf_info->{workflow}->{context}})
+    ) {
+        my $redirect = 'workflow!load!wf_id!'.$wf_id;
         my @activity = keys %{$wf_info->{activity}};
         if (scalar @activity == 1) {
             $redirect .= '!wf_action!'.$activity[0];
@@ -136,7 +137,7 @@ sub init_load {
     my $wf_info = $self->send_command_v2( 'get_workflow_info',  {
         id => $id,
         with_ui_info => 1,
-    });
+    }, { nostatus  => 1 });
 
     if (!$wf_info) {
         $self->status->error('I18N_OPENXPKI_UI_WORKFLOW_UNABLE_TO_LOAD_WORKFLOW_INFORMATION') unless $self->status->is_set;
@@ -167,13 +168,11 @@ sub init_context {
 
     # re-instance existing workflow
     my $id = $self->param('wf_id');
-    my $view = $self->param('view') || '';
-
 
     my $wf_info = $self->send_command_v2( 'get_workflow_info',  {
         id => $id,
         with_ui_info => 1,
-    });
+    }, { nostatus  => 1 });
 
     if (!$wf_info) {
         $self->status->error('I18N_OPENXPKI_UI_WORKFLOW_UNABLE_TO_LOAD_WORKFLOW_INFORMATION') unless $self->status->is_set;
@@ -181,24 +180,17 @@ sub init_context {
     }
 
     $self->set_page(
-        label => 'I18N_OPENXPKI_UI_WORKFLOW_CONTEXT_LABEL #' . $wf_info->{workflow}->{id},
+        label => $self->__page_label($wf_info, 'I18N_OPENXPKI_UI_WORKFLOW_CONTEXT_LABEL'),
         large => 1,
     );
-
-    my %buttons;
-    %buttons = ( buttons => [{
-        page => 'workflow!info!wf_id!'.$wf_info->{workflow}->{id},
-        label => 'I18N_OPENXPKI_UI_WORKFLOW_BACK_TO_INFO_LABEL',
-        format => "primary",
-    }]) if ($view eq 'result');
 
     $self->main->add_section({
         type => 'keyvalue',
         content => {
             label => '',
             data => $self->__render_fields( $wf_info, 'context'),
-            %buttons
-    }});
+        },
+    });
 
     return $self;
 
@@ -218,13 +210,12 @@ sub init_attribute {
 
     # re-instance existing workflow
     my $id = $self->param('wf_id');
-    my $view = $self->param('view') || '';
 
     my $wf_info = $self->send_command_v2( 'get_workflow_info',  {
         id => $id,
         with_attributes => 1,
         with_ui_info => 1,
-    });
+    }, { nostatus  => 1 });
 
     if (!$wf_info) {
         $self->status->error('I18N_OPENXPKI_UI_WORKFLOW_UNABLE_TO_LOAD_WORKFLOW_INFORMATION') unless $self->status->is_set;
@@ -232,24 +223,17 @@ sub init_attribute {
     }
 
     $self->set_page(
-        label => 'I18N_OPENXPKI_UI_WORKFLOW_ATTRIBUTE_LABEL #' . $wf_info->{workflow}->{id},
+        label => $self->__page_label($wf_info, 'I18N_OPENXPKI_UI_WORKFLOW_ATTRIBUTE_LABEL'),
         large => 1,
     );
-
-    my %buttons;
-    %buttons = ( buttons => [{
-        page => 'workflow!info!wf_id!'.$wf_info->{workflow}->{id},
-        label => 'I18N_OPENXPKI_UI_WORKFLOW_BACK_TO_INFO_LABEL',
-        format => "primary",
-    }]) if ($view eq 'result');
 
     $self->main->add_section({
         type => 'keyvalue',
         content => {
             label => '',
             data => $self->__render_fields( $wf_info, 'attribute'),
-            %buttons
-    }});
+        },
+    });
 
     return $self;
 
@@ -275,15 +259,20 @@ sub init_info {
     my $wf_info = $self->send_command_v2( 'get_workflow_info',  {
         id => $id,
         with_ui_info => 1,
-    });
+    }, { nostatus  => 1 });
 
     if (!$wf_info) {
-        $self->page->description('I18N_OPENXPKI_UI_WORKFLOW_UNABLE_TO_LOAD_WORKFLOW_INFORMATION');
-        $self->logger()->warn('Unable to load workflow info for id ' . $id);
+        $self->set_page(label => '');
+        $self->main->add_section({
+            type => 'text',
+            content => {
+                description => 'I18N_OPENXPKI_UI_WORKFLOW_UNABLE_TO_LOAD_WORKFLOW_INFORMATION',
+        }});
+        $self->log->warn('Unable to load workflow info for id ' . $id);
         return $self;
     }
 
-    my $fields = $self->__render_workflow_info( $wf_info, $self->_client->session()->param('wfdetails') );
+    my $fields = $self->__render_workflow_info( $wf_info, $self->session_param('wfdetails') );
 
     push @{$fields}, {
         label => "I18N_OPENXPKI_UI_FIELD_ERROR_CODE",
@@ -331,11 +320,16 @@ sub init_info {
                 'label' => 'I18N_OPENXPKI_UI_WORKFLOW_LOG_LABEL',
             };
         }
+
+        if (@buttons_handle) {
+            $buttons_handle[-1]->{break_after} = 1;
+        }
+        push @buttons_handle, @{$self->__get_global_action_handles($wf_info)};
+
     }
 
-    my $label = sprintf("%s (#%01d)", ($wf_info->{workflow}->{title} || $wf_info->{workflow}->{label} || $wf_info->{workflow}->{type}), $wf_info->{workflow}->{id});
     $self->set_page(
-        shortlabel => $label,
+        label => $self->__page_label($wf_info),
         large => 1,
     );
 
@@ -355,6 +349,20 @@ sub init_info {
 
 }
 
+sub __page_label {
+
+    my $self = shift;
+    my $wf_info = shift;
+    my $additional = shift;
+
+    return sprintf(
+        "#%01d - %s%s",
+        $wf_info->{workflow}->{id},
+        ($wf_info->{workflow}->{title} || $wf_info->{workflow}->{label} || $wf_info->{workflow}->{type}),
+        $additional ? ": $additional" : "",
+    );
+
+}
 
 =head2
 
@@ -368,17 +376,26 @@ sub init_search {
     my $self = shift;
     my $args = shift;
 
+    my $opts = $self->session_param('wfsearch');
+    if (!exists $opts->{default}) {
+        return $self->redirect->to('home');
+    }
+
     $self->set_page(
         label => 'I18N_OPENXPKI_UI_WORKFLOW_SEARCH_LABEL',
         description => 'I18N_OPENXPKI_UI_WORKFLOW_SEARCH_DESC',
+        breadcrumb => {
+            is_root => 1,
+            class => 'workflow-search',
+        },
     );
 
     my $workflows = $self->send_command_v2( 'get_workflow_instance_types' );
     return $self unless defined $workflows;
-    $self->logger->trace('Workflows: ' . Dumper $workflows) if $self->logger->is_trace;
+    $self->log->trace('Workflows: ' . Dumper $workflows) if $self->log->is_trace;
 
     my $preset = $args->{preset} // $self->__wf_search_presets;
-    $self->logger->trace('Presets: ' . Dumper $preset) if $self->logger->is_trace;
+    $self->log->trace('Presets: ' . Dumper $preset) if $self->log->is_trace;
 
     #
     # Search by ID
@@ -386,12 +403,13 @@ sub init_search {
     $self->main->add_form(
         action => 'workflow!load',
         label => 'I18N_OPENXPKI_UI_WORKFLOW_SEARCH_SEARCH_BY_ID_TITLE',
-        submit_label => 'I18N_OPENXPKI_UI_WORKFLOW_SEARCH_SUBMIT_LABEL',
+        submit_label => 'I18N_OPENXPKI_UI_SEARCH_SUBMIT_LABEL',
     )->add_field(
         name => 'wf_id',
         label => 'I18N_OPENXPKI_UI_WORKFLOW_SEARCH_SERIAL_LABEL',
         type => 'text',
         value => $preset->{wf_id} || '',
+        width => 'small',
     );
 
     #
@@ -411,7 +429,7 @@ sub init_search {
     my $form = $self->main->add_form(
         action => 'workflow!search',
         label => 'I18N_OPENXPKI_UI_WORKFLOW_SEARCH_SEARCH_DATABASE_TITLE',
-        submit_label => 'I18N_OPENXPKI_UI_WORKFLOW_SEARCH_SUBMIT_LABEL',
+        submit_label => 'I18N_OPENXPKI_UI_SEARCH_SUBMIT_LABEL',
     )
     ->add_field(
         name => 'wf_type',
@@ -457,7 +475,7 @@ sub init_search {
     );
 
     # Searchable attributes are read from the 'uicontrol' config section
-    my $attributes = $self->_session->param('wfsearch')->{default}->{attributes};
+    my $attributes = $opts->{default}->{attributes};
     my @meta_descr;
     if ($attributes && (ref $attributes eq 'ARRAY')) {
         my @attrib;
@@ -505,11 +523,11 @@ sub __wf_search_presets {
     my $preset;
 
     if (my $queryid = $self->param('query')) {
-        my $result = $self->__load_query($queryid);
+        my $result = $self->__load_query(workflow => $queryid);
         $preset = $result->{input} if $result;
 
     } else {
-        $preset = $self->_session->param('wfsearch')->{default}->{preset} || {};
+        $preset = $self->session_param('wfsearch')->{default}->{preset} || {};
         # convert preset for last_update
         foreach my $key (qw(last_update_before last_update_after)) {
             next unless ($preset->{$key});
@@ -546,10 +564,10 @@ sub init_result {
     if ($limit > 500) {  $limit = 500; }
 
     # Load query from session
-    my $result = $self->__load_query($queryid) or return $self->init_search();
+    my $cache = $self->__load_query(workflow => $queryid) or return $self->init_search();
 
     # Add limits
-    my $query = $result->{query};
+    my $query = $cache->{query};
 
     if ($limit) {
         $query->{limit} = $limit;
@@ -566,45 +584,51 @@ sub init_result {
         }
     }
 
-    $self->logger()->trace( "persisted query: " . Dumper $result) if $self->logger->is_trace;
+    $self->log->trace( "persisted query: " . Dumper $cache) if $self->log->is_trace;
 
     my $search_result = $self->send_command_v2( 'search_workflow_instances', $query );
 
-    $self->logger()->trace( "search result: " . Dumper $search_result) if $self->logger->is_trace;
+    $self->log->trace( "search result: " . Dumper $search_result) if $self->log->is_trace;
 
     # Add page header from result - optional
-    if ($result->{page} && ref $result->{page} eq 'HASH') {
-        $self->set_page(%{ $result->{page} });
+    if ($cache->{page} && ref $cache->{page} eq 'HASH') {
+        $self->set_page(%{ $cache->{page} });
     } else {
-        my $criteria = $result->{criteria} ? '<br>' . (join ", ", @{$result->{criteria}}) : '';
+        my $criteria = $cache->{criteria} ? '<br>' . (join ", ", @{$cache->{criteria}}) : '';
         $self->set_page(
             label => 'I18N_OPENXPKI_UI_WORKFLOW_SEARCH_RESULTS_LABEL',
             description => 'I18N_OPENXPKI_UI_WORKFLOW_SEARCH_RESULTS_DESCRIPTION' . $criteria ,
-            breadcrumb => [
-                { label => 'I18N_OPENXPKI_UI_WORKFLOW_SEARCH_LABEL', className => 'workflow-search' },
-                { label => 'I18N_OPENXPKI_UI_WORKFLOW_SEARCH_RESULTS_TITLE', className => 'workflow-search-result' }
-            ],
+            breadcrumb => {
+                label => 'I18N_OPENXPKI_UI_WORKFLOW_SEARCH_RESULTS_TITLE',
+                class => 'workflow-search-result',
+            },
         );
     }
 
-    my $pager_args = $result->{pager} || {};
+    my $pager = $self->__build_pager(
+        pagename => $cache->{pagename},
+        id => $queryid,
+        query => $query,
+        count => $cache->{count},
+        %{$cache->{pager_args} // {}},
+        limit => $query->{limit},
+        startat => $query->{start},
+    );
 
-    my $pager = $self->__render_pager( $result, { %$pager_args, limit => $query->{limit}, startat => $query->{start} } );
-
-    my $body = $result->{column};
+    my $body = $cache->{column};
     $body = $self->__default_grid_row() if(!$body);
 
     my @lines = $self->__render_result_list( $search_result, $body );
 
-    $self->logger()->trace( "dumper result: " . Dumper \@lines) if $self->logger->is_trace;
+    $self->log->trace( "dumper result: " . Dumper \@lines) if $self->log->is_trace;
 
-    my $header = $result->{header};
+    my $header = $cache->{header};
     $header = $self->__default_grid_head() if(!$header);
 
     # buttons - from result (used in bulk) or default
     my @buttons;
-    if ($result->{button} && ref $result->{button} eq 'ARRAY') {
-        @buttons = @{$result->{button}};
+    if ($cache->{button} && ref $cache->{button} eq 'ARRAY') {
+        @buttons = @{$cache->{button}};
     } else {
 
         push @buttons, { label => 'I18N_OPENXPKI_UI_SEARCH_REFRESH',
@@ -615,14 +639,14 @@ sub init_result {
             label => 'I18N_OPENXPKI_UI_SEARCH_RELOAD_FORM',
             page => 'workflow!search!query!' .$queryid,
             format => 'alternative',
-        } if ($result->{input});
+        } if $cache->{input};
 
         push @buttons,{ label => 'I18N_OPENXPKI_UI_SEARCH_NEW_SEARCH',
             page => 'workflow!search',
             format => 'failure'};
 
         push @buttons, { label => 'I18N_OPENXPKI_UI_SEARCH_EXPORT_RESULT',
-            href => $self->_client()->_config()->{'scripturl'} . '?page=workflow!export!id!'.$queryid,
+            href => $self->_client->script_url . '?page=workflow!export!id!'.$queryid,
             target => '_blank',
             format => 'optional'
             };
@@ -633,7 +657,7 @@ sub init_result {
         className => 'workflow',
         content => {
             actions => [{
-                path => 'workflow!info!wf_id!{serial}',
+                page => 'workflow!info!wf_id!{serial}',
                 label => 'I18N_OPENXPKI_UI_WORKFLOW_OPEN_WORKFLOW_LABEL',
                 icon => 'view',
                 target => 'popup',
@@ -670,10 +694,10 @@ sub init_export {
     if ($limit > 500) {  $limit = 500; }
 
     # Load query from session
-    my $result = $self->__load_query($queryid) or return $self->init_search();
+    my $cache = $self->__load_query(workflow => $queryid) or return $self->init_search();
 
     # Add limits
-    my $query = $result->{query};
+    my $query = $cache->{query};
     $query->{limit} = $limit;
     $query->{start} = $startat;
 
@@ -684,13 +708,13 @@ sub init_export {
         }
     }
 
-    $self->logger()->trace( "persisted query: " . Dumper $result) if $self->logger->is_trace;
+    $self->log->trace( "persisted query: " . Dumper $cache) if $self->log->is_trace;
 
     my $search_result = $self->send_command_v2( 'search_workflow_instances', $query );
 
-    $self->logger()->trace( "search result: " . Dumper $search_result) if $self->logger->is_trace;
+    $self->log->trace( "search cache: " . Dumper $search_result) if $self->log->is_trace;
 
-    my $header = $result->{header};
+    my $header = $cache->{header};
     $header = $self->__default_grid_head() if(!$header);
 
     my @head;
@@ -708,7 +732,7 @@ sub init_export {
 
     my $buffer = join("\t", @head)."\n";
 
-    my $body = $result->{column};
+    my $body = $cache->{column};
     $body = $self->__default_grid_row() if(!$body);
 
     my @lines = $self->__render_result_list( $search_result, $body );
@@ -729,7 +753,7 @@ sub init_export {
         -attachment => "workflow export " . DateTime->now()->iso8601() .  ".txt"
     );
 
-    print i18nTokenizer($buffer);
+    print Encode::encode('UTF-8', i18nTokenizer($buffer));
     exit;
 
 }
@@ -749,7 +773,7 @@ sub init_pager {
     my $queryid = $self->param('id');
 
     # Load query from session
-    my $result = $self->__load_query($queryid) or return $self->init_search();
+    my $cache = $self->__load_query(workflow => $queryid) or return $self->init_search();
 
     my $startat = $self->param('startat');
 
@@ -761,7 +785,7 @@ sub init_pager {
     $startat = int($startat / $limit) * $limit;
 
     # Add limits
-    my $query = $result->{query};
+    my $query = $cache->{query};
     $query->{limit} = $limit;
     $query->{start} = $startat;
 
@@ -773,20 +797,20 @@ sub init_pager {
         $query->{reverse} = $self->param('reverse');
     }
 
-    $self->logger()->trace( "persisted query: " . Dumper $result) if $self->logger->is_trace;
-    $self->logger()->trace( "executed query: " . Dumper $query) if $self->logger->is_trace;
+    $self->log->trace( "persisted query: " . Dumper $cache) if $self->log->is_trace;
+    $self->log->trace( "executed query: " . Dumper $query) if $self->log->is_trace;
 
-    my $search_result = $self->send_command_v2( 'search_workflow_instances', $query );
+    my $search_result = $self->send_command_v2(search_workflow_instances => $query);
 
-    $self->logger()->trace( "search result: " . Dumper $search_result) if $self->logger->is_trace;
+    $self->log->trace( "search result: " . Dumper $search_result) if $self->log->is_trace;
 
 
-    my $body = $result->{column};
-    $body = $self->__default_grid_row() if(!$body);
+    my $body = $cache->{column};
+    $body = $self->__default_grid_row() unless $body;
 
     my @result = $self->__render_result_list( $search_result, $body );
 
-    $self->logger()->trace( "dumper result: " . Dumper @result) if $self->logger->is_trace;
+    $self->log->trace( "dumper result: " . Dumper @result) if $self->log->is_trace;
 
     $self->confined_response({ data => \@result });
 
@@ -807,22 +831,19 @@ sub init_history {
     my $id = $self->param('wf_id');
     my $view = $self->param('view') || '';
 
+    my $wf_info = $self->send_command_v2( 'get_workflow_info',  {
+        id => $id,
+    }, { nostatus  => 1 });
+
     $self->set_page(
-        label => 'I18N_OPENXPKI_UI_WORKFLOW_HISTORY_TITLE',
+        label => $self->__page_label($wf_info, 'I18N_OPENXPKI_UI_WORKFLOW_HISTORY_TITLE'),
         description => 'I18N_OPENXPKI_UI_WORKFLOW_HISTORY_DESCRIPTION',
         large => 1,
     );
 
     my $workflow_history = $self->send_command_v2( 'get_workflow_history', { id => $id } );
 
-    my %buttons;
-    %buttons = ( buttons => [{
-        page => 'workflow!info!wf_id!'.$id,
-        label => 'I18N_OPENXPKI_UI_WORKFLOW_BACK_TO_INFO_LABEL',
-        format => "primary",
-    }]) if ($view eq 'result');
-
-    $self->logger()->trace( "dumper result: " . Dumper $workflow_history) if $self->logger->is_trace;
+    $self->log->trace( "dumper result: " . Dumper $workflow_history) if $self->log->is_trace;
 
     my $i = 1;
     my @result;
@@ -837,7 +858,7 @@ sub init_history {
         ]
     }
 
-    $self->logger()->trace( "dumper result: " . Dumper $workflow_history) if $self->logger->is_trace;
+    $self->log->trace( "dumper result: " . Dumper $workflow_history) if $self->log->is_trace;
 
     $self->main->add_section({
         type => 'grid',
@@ -852,7 +873,6 @@ sub init_history {
                 { sTitle => 'I18N_OPENXPKI_UI_WORKFLOW_HISTORY_NODE_LABEL' },
             ],
             data => \@result,
-            %buttons,
         },
     });
 
@@ -877,16 +897,16 @@ sub init_mine {
         description => 'I18N_OPENXPKI_UI_MY_WORKFLOW_DESCRIPTION',
     );
 
-    my $tasklist = $self->_client->session()->param('tasklist')->{mine};
+    my $tasklist = $self->session_param('tasklist')->{mine};
 
     my $default = {
         query => {
-            attribute => { 'creator' => $self->_session->param('user')->{name} },
+            attribute => { 'creator' => $self->session_param('user')->{name} },
             order => 'workflow_id',
             reverse => 1,
         },
         actions => [{
-            path => 'workflow!info!wf_id!{serial}',
+            page => 'workflow!info!wf_id!{serial}',
             label => 'I18N_OPENXPKI_UI_WORKFLOW_OPEN_WORKFLOW_LABEL',
             icon => 'view',
             target => 'popup',
@@ -925,13 +945,13 @@ sub init_task {
 
     $self->page->label('I18N_OPENXPKI_UI_WORKFLOW_OUTSTANDING_TASKS_LABEL');
 
-    my $tasklist = $self->_client->session()->param('tasklist')->{default};
+    my $tasklist = $self->session_param('tasklist')->{default};
 
     if (!@$tasklist) {
         return $self->redirect->to('home');
     }
 
-    $self->logger()->trace( "got tasklist: " . Dumper $tasklist) if $self->logger->is_trace;
+    $self->log->trace( "got tasklist: " . Dumper $tasklist) if $self->log->is_trace;
 
     foreach my $item (@$tasklist) {
         $self->__render_task_list($item);
@@ -955,23 +975,20 @@ sub init_log {
     my $id = $self->param('wf_id');
     my $view = $self->param('view') || '';
 
+    my $wf_info = $self->send_command_v2( 'get_workflow_info',  {
+        id => $id,
+    }, { nostatus  => 1 });
+
     $self->set_page(
-        label => 'I18N_OPENXPKI_UI_WORKFLOW_LOG',
+        label => $self->__page_label($wf_info, 'I18N_OPENXPKI_UI_WORKFLOW_LOG'),
         large => 1,
     );
 
     my $result = $self->send_command_v2( 'get_workflow_log', { id => $id } );
 
-    my %buttons;
-    %buttons = ( buttons => [{
-        page => 'workflow!info!wf_id!'.$id,
-        label => 'I18N_OPENXPKI_UI_WORKFLOW_BACK_TO_INFO_LABEL',
-        format => "primary",
-    }]) if ($view eq 'result');
-
     $result = [] unless($result);
 
-    $self->logger()->trace( "dumper result: " . Dumper $result) if $self->logger->is_trace;
+    $self->log->trace( "dumper result: " . Dumper $result) if $self->log->is_trace;
 
     $self->main->add_section({
         type => 'grid',
@@ -984,7 +1001,6 @@ sub init_log {
             ],
             data => $result,
             empty => 'I18N_OPENXPKI_UI_TASK_LIST_EMPTY_LABEL',
-            %buttons,
         }
     });
 
@@ -1005,7 +1021,7 @@ sub __render_task_list {
     my $query = $item->{query};
     my $limit = 25;
 
-    $query = { $self->__tenant(), %$query } unless($query->{tenant});
+    $query = { $self->__tenant_param(), %$query } unless($query->{tenant});
 
     if ($query->{limit}) {
         $limit = $query->{limit};
@@ -1017,11 +1033,6 @@ sub __render_task_list {
         if (!defined $query->{reverse}) {
             $query->{reverse} = 1;
         }
-    }
-
-    my $pager_args = { limit => $limit };
-    if ($item->{pager}) {
-        $pager_args = $item->{pager};
     }
 
     my @cols;
@@ -1036,7 +1047,7 @@ sub __render_task_list {
         );
     }
 
-    my $actions = $item->{actions} // [{ path => 'redirect!workflow!load!wf_id!{serial}', icon => 'view' }];
+    my $actions = $item->{actions} // [{ page => 'redirect!workflow!load!wf_id!{serial}', icon => 'view' }];
 
     # create the header from the columns spec
     my ($header, $column, $rattrib) = $self->__render_list_spec( \@cols );
@@ -1045,7 +1056,7 @@ sub __render_task_list {
         $query->{return_attributes} = $rattrib;
     }
 
-    $self->logger()->trace( "columns : " . Dumper $column) if $self->logger->is_trace;
+    $self->log->trace( "columns : " . Dumper $column) if $self->log->is_trace;
 
     my $search_result = $self->send_command_v2( 'search_workflow_instances', { limit => $limit, %$query } );
 
@@ -1063,24 +1074,35 @@ sub __render_task_list {
 
         @data = $self->__render_result_list( $search_result, $column );
 
-        $self->logger()->trace( "dumper result: " . Dumper @data) if $self->logger->is_trace;
+        $self->log->trace( "dumper result: " . Dumper @data) if $self->log->is_trace;
 
         if ($limit == scalar @$search_result) {
             my %count_query = %{$query};
             delete $count_query{order};
             delete $count_query{reverse};
+
             my $result_count= $self->send_command_v2( 'search_workflow_instances_count', \%count_query  );
-            my $queryid = $self->__generate_uid();
-            my $_query = {
-                'id' => $queryid,
-                'type' => 'workflow',
-                'count' => $result_count,
-                'query' => $query,
-                'column' => $column,
-                'pager' => $pager_args,
+
+            my $pager_args = OpenXPKI::Util::filter_hash($item->{pager}, qw(limit pagesizes pagersize));
+
+            my $cache = {
+                pagename => 'workflow',
+                query => $query,
+                count => $result_count,
+                column => $column,
+                pager_args => $pager_args,
             };
-            $self->__save_query($queryid => $_query);
-            $pager = $self->__render_pager( $_query, $pager_args );
+
+            my $queryid = $self->__save_query($cache);
+
+            $pager = $self->__build_pager(
+                pagename => 'workflow',
+                id => $queryid,
+                query => $query,
+                count => $result_count,
+                limit => $limit,
+                %$pager_args,
+            );
         }
 
     }

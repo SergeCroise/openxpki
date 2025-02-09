@@ -1,5 +1,5 @@
 package OpenXPKI::Server::API2::Plugin::Cert::validate_certificate;
-use OpenXPKI::Server::API2::EasyPlugin;
+use OpenXPKI -plugin;
 
 =head1 NAME
 
@@ -12,7 +12,7 @@ OpenXPKI::Server::API2::Plugin::Cert::validate_certificate
 use OpenXPKI::Debug;
 use OpenXPKI::Crypt::X509;
 use OpenXPKI::Server::Context qw( CTX );
-use OpenXPKI::Server::API2::Types;
+use OpenXPKI::Types;
 
 
 

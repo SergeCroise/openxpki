@@ -1,12 +1,7 @@
-## OpenXPKI::DN
-##
-## Written by Michael Bell for the OpenXPKI project
-## Copyright (C) 2004-2005 by The OpenXPKI Project
+package OpenXPKI::DN;
 
 use strict;
 use warnings;
-use utf8;
-package OpenXPKI::DN;
 
 use Memoize;
 use Text::CSV_XS;
@@ -34,6 +29,8 @@ my %mapping_of = (
     PSEUDONYM            => "pseudonym",
     ROLE                 => "role",
     DESCRIPTION          => "description",
+    UNSTRUCTUREDNAME     => "unstructuredName",
+    UNSTRUCTUREDADDRESS  => "unstructuredAddress",
     );
 
 sub new

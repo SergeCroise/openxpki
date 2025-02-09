@@ -1,13 +1,9 @@
-## OpenXPKI::Exception
-##
-## Written by Michael Bell for the OpenXPKI project
-## Copyright (C) 2005 by The OpenXPKI Project
-
 package OpenXPKI::Exception;
 
 use strict;
 use warnings;
-use utf8;
+
+use Scalar::Util qw(blessed);
 
 use OpenXPKI::Debug;
 use OpenXPKI::Server::Context;
@@ -18,17 +14,34 @@ use Exception::Class (
     'OpenXPKI::Exception' => {
         fields => [ 'children', 'params' ],
     },
+    # Validation failed on workflow or api input field
     'OpenXPKI::Exception::InputValidator' => {
-        isa         => 'OpenXPKI::Exception',
+        isa => 'OpenXPKI::Exception',
         fields => [ 'errors', 'action' ],
     },
+    # Authentication request was not successful
     'OpenXPKI::Exception::Authentication' => {
-        isa         => 'OpenXPKI::Exception',
-        fields => [ 'error', 'authinfo' ],
+        isa => 'OpenXPKI::Exception',
+        fields => [ 'stack', 'error', 'authinfo' ],
     },
+    # Timeout while waiting for a socket or external process
     'OpenXPKI::Exception::Timeout' => {
-        isa         => 'OpenXPKI::Exception',
+        isa => 'OpenXPKI::Exception',
         fields => [ 'error', 'command', 'timeout' ],
+    },
+    # Error during socket communication
+    'OpenXPKI::Exception::Socket' => {
+        isa => 'OpenXPKI::Exception',
+        fields => [ 'error', 'socket' ],
+    },
+    # Error while executing a command
+    'OpenXPKI::Exception::Command' => {
+        isa => 'OpenXPKI::Exception',
+        fields => [ 'error' ],
+    },
+    # Error while executing a command
+    'OpenXPKI::Exception::WorkflowPickupFailed' => {
+        isa => 'OpenXPKI::Exception',
     },
 );
 
@@ -61,7 +74,7 @@ sub full_message {
     }
 
     ## put together and translate message
-    my $msg = OpenXPKI::i18n::i18nGettext ($self->{message}, %{$self->{params}});
+    my $msg = OpenXPKI::i18n::i18nGettext($self->{message} );
 
     # append all parameters if message was not translated
     if ($msg eq $self->{message} and scalar keys %{$self->{params}}) {
@@ -117,7 +130,21 @@ sub throw {
 
     $proto->rethrow if ref $proto;
 
-    my %args           = (@_);
+    # lazy mode -  message string given as single argument
+    my %args = (@_);
+    if (scalar @_ == 1) {
+        %args = (message => shift );
+    } else {
+        %args           = (@_);
+    }
+
+    # If an error is given and the error is an OpenXPKI::Exception
+    # we do NOT create a new exeption but rethrow it
+    if ($args{error} && blessed($args{error}) && $args{error}->isa('OpenXPKI::Exception')) {
+        ##! 32: 'rethrow existing exception'
+        $args{error}->rethrow();
+    }
+
     my %exception_args = %args;
     delete $exception_args{log};
 

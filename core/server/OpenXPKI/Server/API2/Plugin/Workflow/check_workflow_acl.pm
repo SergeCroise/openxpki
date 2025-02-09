@@ -1,5 +1,5 @@
 package OpenXPKI::Server::API2::Plugin::Workflow::check_workflow_acl;
-use OpenXPKI::Server::API2::EasyPlugin;
+use OpenXPKI -plugin;
 
 =head1 NAME
 
@@ -9,7 +9,7 @@ OpenXPKI::Server::API2::Plugin::Workflow::check_workflow_acl
 
 # Project modules
 use OpenXPKI::Server::Context qw( CTX );
-use OpenXPKI::Server::API2::Types;
+use OpenXPKI::Types;
 
 
 =head1 COMMANDS
@@ -27,7 +27,7 @@ B<Parameters>
 
 =item * C<id> I<Int> - workflow ID
 
-=item * C<tenant> I<Str> - tenant
+=item * C<tenant> L<Tenant|OpenXPKI::Types/Tenant> - tenant
 
 If set to a tenant name the workflow must be owned by this tenant.
 Otherwise, the workflows tenant must be accessible by the current user.
@@ -37,7 +37,7 @@ Otherwise, the workflows tenant must be accessible by the current user.
 =cut
 command "check_workflow_acl" => {
     id => { isa => 'Int', required => 1, },
-    tenant => { isa => 'Str' },
+    tenant => { isa => 'Tenant' },
 } => sub {
     my ($self, $params) = @_;
 

@@ -10,8 +10,11 @@ use OpenXPKI::Serialization::Simple;
 
 __PACKAGE__->mk_accessors(qw(regex error modifier field));
 
-sub _init {
+sub init {
     my ( $self, $params ) = @_;
+
+    $self->SUPER::init( $params );
+
     $self->regex( $params->{regex} // '' );
 
     # Default modifier is /xi
@@ -43,7 +46,7 @@ sub validate {
     ##! 1: 'start'
 
     if (!defined $value || $value eq '') {
-         CTX('log')->application()->info("Regex validator skipped - value is empty");
+         CTX('log')->application()->debug("Regex validator skipped - value is empty");
 
         return 1;
     }
@@ -56,8 +59,7 @@ sub validate {
 
     # replace named regexes
     if ($regex eq 'email') {
-        $regex = qr/ \A \S+\@([\w-]+\.)+(\w+) \z /xi;
-
+        $regex = qr/ \A [\w\+\.\-"'= ]+\@([\w-]+\.)+(\w+) \z /xi;
     } elsif ($regex eq 'fqdn') {
         $regex = qr/ \A (([a-z0-9][\w\-]*\.)+)[\w\-]{2,} \z /xi;
 

@@ -48,13 +48,19 @@ use File::Temp;
 
 # CPAN modules
 use Proc::ProcessTable;
+use Type::Params qw( signature_for );
 
 # Project modules
 use OpenXPKI::VERSION;
 use OpenXPKI::Debug;
 
+# Feature::Compat::Try should be done last to safely disable warnings
+use Feature::Compat::Try;
 
-=head2 start {CONFIG, SILENT, PID, FOREGROUND, DEBUG, KEEP_TEMP}
+# should be done after imports to safely disable warnings in Perl < 5.36
+use experimental 'signatures';
+
+=head2 start {CONFIG, SILENT, PID, DEBUG, KEEP_TEMP}
 
 Start the server.
 
@@ -64,9 +70,6 @@ Parameters:
 
 =item PID
 Pid to check for a running server
-
-=item FOREGROUND (0|1)
-Weather to start the daemon in foreground (implies restart)
 
 =item RESTART (0|1)
 Weather to restart a running server
@@ -95,8 +98,8 @@ sub start {
     my $args = shift;
     my $silent = $args->{SILENT};
     my $pid        = $args->{PID};
-    my $foreground = $args->{FOREGROUND} || $args->{NODETACH};
-    my $restart = $args->{RESTART} || $args->{FOREGROUND};
+    my $foreground = $args->{NODETACH};
+    my $restart = $args->{RESTART};
     my $debug_level = $args->{DEBUG_LEVEL} || 0;
     my $debug_bitmask = $args->{DEBUG_BITMASK} || 0;
     my $debug_nocensor = $args->{DEBUG_NOCENSOR} || 0;
@@ -184,15 +187,8 @@ sub start {
     }
 
     if (not $silent) {
-        eval {require OpenXPKI::Enterprise;};
-        if ($EVAL_ERROR) {
-            print STDOUT "Starting OpenXPKI Community Edition v$OpenXPKI::VERSION::VERSION\n";
-        } else {
-            print STDOUT "Starting OpenXPKI Enterprise Edition v$OpenXPKI::VERSION::VERSION\n";
-            if ($config->{license}) {
-                print STDOUT OpenXPKI::Enterprise::get_license_string($config->{license})."\n";
-            }
-        }
+        my $version = get_version(config => $config->{oxi_config});
+        print STDOUT "Starting $version\n";
     }
     unlink $pidfile if ($pidfile && -e $pidfile);
 
@@ -291,7 +287,7 @@ sub start {
             require OpenXPKI::Server;
             my $server = OpenXPKI::Server->new(
                 'SILENT' => $silent ? 1 : 0,
-                'TYPE'   => ($args->{FOREGROUND} ? 'Simple' : $config->{TYPE}),
+                'TYPE'   => $config->{TYPE},
                 'NODETACH' => $args->{NODETACH}
             );
             $server->start;
@@ -443,18 +439,34 @@ sub status {
     return 0;
 }
 
-sub version {
+signature_for get_version => (
+    named => [
+        config => 'OpenXPKI::Config', { optional => 1 },
+        config_args => 'HashRef', { optional => 1 },
+    ],
+);
+sub get_version ($arg) {
 
-    my $args = shift;
-    my $config = OpenXPKI::Control::__probe_config( $args );
-    eval {require OpenXPKI::Enterprise;};
-    if ($EVAL_ERROR) {
-        print STDOUT "OpenXPKI Community Edition v$OpenXPKI::VERSION::VERSION\n\n";
-    } else {
-        print STDOUT "OpenXPKI Enterprise Edition v$OpenXPKI::VERSION::VERSION\n";
-        print STDOUT OpenXPKI::Enterprise::get_license_string($config->{license})."\n";
+    my $is_enterprise = 0;
+    try {
+        require OpenXPKI::Enterprise;
+        $is_enterprise = 1;
     }
-    return 0;
+    catch ($err) {
+        # suppress "module not found" but fail loudly on any other error
+        die $err unless $err =~ m{locate OpenXPKI/Enterprise\.pm in \@INC};
+    }
+
+    if ($is_enterprise) {
+        my $license = $arg->config
+            ? $arg->config->get('system.license')
+            : OpenXPKI::Control::__probe_config( $arg->config_args )->{license};
+        my $version = "OpenXPKI Enterprise Edition v$OpenXPKI::VERSION::VERSION";
+        $version .= "\n" . OpenXPKI::Enterprise::get_license_string($license) if $license;
+        return $version;
+    } else {
+        return "OpenXPKI Community Edition v$OpenXPKI::VERSION::VERSION";
+    }
 
 }
 
@@ -534,7 +546,7 @@ watchdog and user initiated requests).
 
 sub get_pids {
     my $proc = Proc::ProcessTable->new;
-    my $result = { 'server' => 0, 'watchdog' => [], 'worker' => [], 'workflow' => [] };
+    my $result = { 'server' => 0, 'watchdog' => [], 'worker' => [], 'workflow' => [], 'prometheus' => 0 };
     my $pgrp = getpgrp($$); # Process Group of myself
     for my $p ( @{$proc->table} ) {
         next unless $pgrp == $p->pgrp;
@@ -551,6 +563,9 @@ sub get_pids {
         }
         if ($cmd =~ / ^ openxpkid .* workflow /x) {
             push @{$result->{workflow}}, $p->pid; next;
+        }
+        if ($cmd =~ / ^ openxpkid .* Prometheus /x) {
+            $result->{prometheus} = $p->pid; next;
         }
     }
     return $result;
@@ -643,6 +658,7 @@ sub __probe_config {
         TYPE => $config->get('system.server.type') || 'Fork',
         depend => $config->get_hash('system.version.depend') || undef,
         license => $config->get('system.license') || '',
+        oxi_config => $config,
     };
 
 }

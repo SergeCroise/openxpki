@@ -18,7 +18,7 @@ use warnings;
 
 package OpenXPKI::Debug;
 
-use POSIX;
+use POSIX ();
 use English;
 use Filter::Util::Call;
 use Data::Dumper;
@@ -28,6 +28,10 @@ our %LEVEL;
 our %BITMASK;
 our $USE_COLOR = 0;
 our $NOCENSOR = 0;
+
+$Data::Dumper::Indent = 1;   # fixed width indentation
+$Data::Dumper::Terse = 1;    # don't output a statement (skip "$VAR1 = ")
+$Data::Dumper::Sortkeys = 1; # sort hash keys
 
 sub import {
     my($self,$module) = @_ ;
@@ -90,7 +94,7 @@ sub import {
 sub __level_to_bitmask {
     my ($level) = @_;
     # get the exponent of the last power of 2
-    my $log_base_2 = floor( log($level) / log(2) );
+    my $log_base_2 = POSIX::floor( log($level) / log(2) );
     # set all bits up to that power of 2
     return 2 ** ($log_base_2 + 1) - 1;
 }
@@ -212,7 +216,7 @@ sub debug {
     $subroutine =~ s/OpenXPKI::Client::/O:C:/;
     $msg = "$subroutine $msg\n";
 
-    my $timestamp = strftime("%F %T", localtime(time));
+    my $timestamp = POSIX::strftime("%F %T", localtime(time));
     eval {
         # if HiRes is available, we want HiRes timestamps ...
         require Time::HiRes;

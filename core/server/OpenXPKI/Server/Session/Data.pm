@@ -1,18 +1,20 @@
 package OpenXPKI::Server::Session::Data;
-
 use Moose;
-
-use utf8;
 
 # CPAN modules
 use Data::UUID;
 use Digest::SHA qw( sha1_hex );
 use JSON;
+use Type::Params qw( signature_for );
 
 # Project modules
 use OpenXPKI::Exception;
-use OpenXPKI::MooseParams;
 use OpenXPKI::Debug;
+use OpenXPKI::Serialization::Simple;
+use OpenXPKI::Types;
+
+# should be done after imports to safely disable warnings in Perl < 5.36
+use experimental 'signatures';
 
 =head1 NAME
 
@@ -51,7 +53,7 @@ my %ATTR_TYPES = (
     user                 => { isa => 'Str', },
     role                 => { isa => 'Str', trigger => sub { my $self = shift; $self->_attr_change; $self->clear_primary_tenant() } },
     tenants              => { isa => 'ArrayRef', trigger => sub { my $self = shift; $self->_attr_change; $self->clear_primary_tenant() } },
-    primary_tenant       => { isa => 'Str|Undef' },
+    primary_tenant       => { isa => 'Tenant|Undef' },
     userinfo             => { isa => 'HashRef|Undef' },
     authinfo             => { isa => 'HashRef|Undef' },  # login / refresh links for SSO
     pki_realm            => { isa => 'Str', },
@@ -204,17 +206,20 @@ B<Named parameters>
 =back
 
 =cut
-sub secret {
-    my ($self, %params) = named_args(\@_,   # OpenXPKI::MooseParams
-        group => { isa => 'Str', optional => 1 },
-        value => { isa => 'Str', optional => 1 },
-    );
-    my $digest = sha1_hex($params{group} || "");
+signature_for secret => (
+    method => 1,
+    named => [
+        group => 'Optional[ Str ]', { default => '' },
+        value => 'Optional[ Str ]',
+    ],
+);
+sub secret ($self, $arg) {
+    my $digest = sha1_hex($arg->group);
 
     # getter
-    return $self->_get_secret($digest) unless $params{value};
+    return $self->_get_secret($digest) unless $arg->value;
     # setter
-    $self->_set_secret($digest => $params{value});
+    $self->_set_secret($digest => $arg->value);
 }
 
 =head2 clear_secret
@@ -230,11 +235,14 @@ B<Named parameters>
 =back
 
 =cut
-sub clear_secret {
-    my ($self, %params) = named_args(\@_,   # OpenXPKI::MooseParams
-        group => { isa => 'Str' },
-    );
-    my $digest = sha1_hex($params{group} || "");
+signature_for clear_secret => (
+    method => 1,
+    named => [
+        group => 'Optional[ Str ]', { default => '' },
+    ],
+);
+sub clear_secret ($self, $arg) {
+    my $digest = sha1_hex($arg->group);
     $self->_delete_secret($digest);
 }
 
@@ -259,21 +267,23 @@ default: all attributes)
 =back
 
 =cut
-sub freeze {
-    my ($self, %params) = named_args(\@_,   # OpenXPKI::MooseParams
-        except => { isa => 'ArrayRef', optional => 1 },
-        only => { isa => 'ArrayRef', optional => 1 },
-    );
-
-    my $data_hash = $params{only}
-        ? $self->get_attributes(@{ $params{only} })
+signature_for freeze => (
+    method => 1,
+    named => [
+        except => 'Optional[ ArrayRef ]',
+        only => 'Optional[ ArrayRef ]',
+    ],
+);
+sub freeze ($self, $arg) {
+    my $data_hash = $arg->only
+        ? $self->get_attributes(@{ $arg->only })
         : $self->get_attributes;
 
-    if ($params{except}) {
-        delete $data_hash->{$_} for @{ $params{except} };
+    if ($arg->except) {
+        delete $data_hash->{$_} for @{ $arg->except };
     }
 
-    return "JSON:".($self->_json()->encode($data_hash));
+    return "JSON:".($self->_json->encode($data_hash));
 }
 
 =head2 thaw
@@ -287,19 +297,20 @@ of serialization (encoder ID).
 Returns the object instance (allows for method chaining).
 
 =cut
-sub thaw {
-    my ($self, $frozen) = @_;
-
+signature_for thaw => (
+    method => 1,
+    positional => [ 'Str' ],
+);
+sub thaw ($self, $frozen) {
     my $data_hash;
     # backwards compatibility
     if ($frozen =~ /^HASH\n/ ) {
-        use OpenXPKI::Serialization::Simple;
         $data_hash = OpenXPKI::Serialization::Simple->new->deserialize($frozen);
     }
     else {
         OpenXPKI::Exception->throw(message => "Unknown format of serialized data")
             unless $frozen =~ /^JSON:/;
-        $data_hash = $self->_json()->decode(substr($frozen,5));
+        $data_hash = $self->_json->decode(substr($frozen,5));
     }
 
     # set session attributes via accessor methods

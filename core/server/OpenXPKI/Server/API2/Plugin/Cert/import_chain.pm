@@ -1,5 +1,5 @@
 package OpenXPKI::Server::API2::Plugin::Cert::import_chain;
-use OpenXPKI::Server::API2::EasyPlugin;
+use OpenXPKI -plugin;
 
 =head1 NAME
 
@@ -11,11 +11,10 @@ OpenXPKI::Server::API2::Plugin::Cert::import_chain
 use OpenXPKI::Exception;
 use OpenXPKI::Crypt::X509;
 use OpenXPKI::Server::Context qw( CTX );
-use OpenXPKI::Server::API2::Types;
+use OpenXPKI::Types;
 
-# CPAN modules
-use Try::Tiny;
-
+# Feature::Compat::Try should be done last to safely disable warnings
+use Feature::Compat::Try;
 
 =head1 COMMANDS
 
@@ -146,12 +145,12 @@ command "import_chain" => {
             push @imported, $db_insert;
             CTX('log')->system()->info("Certificate $cert_identifier sucessfully imported");
         }
-        catch {
-            my $err = $_;
-            $err = $_->message if ref $_ eq 'OpenXPKI::Exception';
-            CTX('log')->system->error("Import of certificate $cert_identifier failed with $err");
-            push @failed, { cert_identifier => $cert_identifier, error => $err };
-        };
+        catch ($err) {
+            my $msg = $err;
+            $msg = $err->message if ref $err eq 'OpenXPKI::Exception';
+            CTX('log')->system->error("Import of certificate $cert_identifier failed with: $msg");
+            push @failed, { cert_identifier => $cert_identifier, error => $msg };
+        }
 
     }
 

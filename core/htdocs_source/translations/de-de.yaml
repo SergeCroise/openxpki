@@ -8,8 +8,10 @@ site:
     loading: "Laden..."
     redirecting: "Weiterleitung..."
   close_popup: "Schließen"
+  back: "Zurück"
   workflow_info: "Workflow"
   old_browser: "Sie benutzen eine veraltete Browser-Version: {browser}. Das kann zu Problemen bei der Benutzung von OpenXPKI führen."
+  session_renewed: "Sie haben sich in einem anderen Browser-Fenster neu angemeldet.\nDie Anmelde-Sitzung wurde erneuert, bitte wiederholen Sie die eben ausgeführte Aktion."
 
 userinfo:
   name: "Angemeldet als"
@@ -21,8 +23,8 @@ error_popup:
   header: "Anwendungsfehler"
   message:
     server: "Der Server lieferte nicht die erwarteten Daten.<br>Eventuell ist Ihre Sitzung abgelaufen oder es liegt ein interner Fehler vor.<br>HTTP-Code: {code}"
-    network: "Die Verbindung zum Server scheint nicht zu bestehen: {reason}"
-    client: "Es trat ein Fehler beim Verarbeiten der empfangenen Serverdaten auf: {reason}"
+    network: "Die Verbindung zum Server scheint nicht zu bestehen:<br>\"{reason}\""
+    client: "Es trat ein Fehler beim Verarbeiten der empfangenen Serverdaten auf:<br>\"{reason}\""
   reload: "Anwendung neu laden"
 
 pagination:
@@ -35,6 +37,10 @@ button:
   confirm_dialog:
     ok: "Bestätigen"
     cancel: "Abbrechen"
+  workflow:
+    copy_id:
+      label: "Workflow #{id}"
+      tooltip: "Workflow-ID kopieren"
 
 component:
   oxifield_datetime:

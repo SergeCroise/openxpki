@@ -6,126 +6,7 @@ use ExtUtils::MakeMaker;
 use File::Spec;
 
 my $vergen = '../../tools/vergen';
-
-###########################################################################
-# determine OpenSSL version
-## first we have to find a working OpenSSL
-
-# OPENSSL_LIB
-# OPENSSL_INC
-# OPENSSL_PREFIX set
-# /usr/local/ssl
-# /usr/local
-# /usr
-# /
-# ...
-
-my $openssl_inc_dir = '';
-my $openssl_lib_dir = '';
-my $openssl_binary  = '';
-
-my @paths = qw( /usr/local/ssl
-                /opt/local/ssl
-                /usr/local
-                /opt/local
-                /usr
-                /opt
-              );
-
-unshift @paths, $ENV{OPENSSL_PREFIX}
-    if (exists $ENV{OPENSSL_PREFIX} and $ENV{OPENSSL_PREFIX} ne '');
-
-my $tmp_ver;
-
-foreach my $path (@paths) {
-    my $tmp_inc = File::Spec->catfile($path, 'include');
-    $tmp_ver = File::Spec->catfile($tmp_inc, 'openssl', 'opensslv.h');
-    my $tmp_lib = File::Spec->catfile($path, 'lib');
-    my $tmp_bin = File::Spec->catfile($path, 'bin', 'openssl');
-
-    if (-d $tmp_inc &&
-        -d $tmp_lib &&
-        -r $tmp_ver &&
-        -r $tmp_bin && -x $tmp_bin) {
-        $openssl_inc_dir = $tmp_inc;
-        $openssl_lib_dir = $tmp_lib;
-        $openssl_binary  = $tmp_bin;
-        last;
-    }
-}
-
-# accept settings from OPENSSL_INC and OPENSSL_LIB if BOTH exist
-if (exists $ENV{OPENSSL_INC} && $ENV{OPENSSL_INC} != "" &&
-    exists $ENV{OPENSSL_LIB} && $ENV{OPENSSL_LIB} != ""
-) {
-    $openssl_inc_dir = $ENV{OPENSSL_INC};
-    $openssl_lib_dir = $ENV{OPENSSL_LIB};
-}
-
-die "Could not find usable OpenSSL installation. Stopped"
-    unless defined $openssl_inc_dir;
-
-die "Could not find usable OpenSSL binary. Stopped"
-    unless defined $openssl_binary;
-
-print STDERR "OpenSSL library: $openssl_lib_dir\n";
-print STDERR "OpenSSL headers: $openssl_inc_dir\n";
-print STDERR "OpenSSL binary:  $openssl_binary\n";
-
-# ask the binary for it's version
-# openssl version should produce output like this:
-# OpenSSL 0.9.7l 28 Sep 2006
-# OpenSSL 1.0.0a 1 Jun 2010
-my $openssl_version_string = `$openssl_binary version`;
-my ($openssl_version_major, $openssl_version_minor, $openssl_version_fix, $openssl_version_patch, $openssl_version_flavour);
-if ($openssl_version_string =~ m/\s*OpenSSL\s+(\d+)\.(\d+)\.(\d+)([a-zA-Z]+)/i) {
-    # OpenSSL 0.9
-    $openssl_version_flavour = 'OpenSSL';
-    $openssl_version_major = $1;
-    $openssl_version_minor = $2;
-    $openssl_version_fix   = $3;
-    $openssl_version_patch = $4;
-    print "$openssl_version_flavour version: major=$openssl_version_major, minor=$openssl_version_minor, fix=$openssl_version_fix, patch=$openssl_version_patch\n";
-
-} elsif ($openssl_version_string =~ m/\s*(OpenSSL|LibreSSL)\s+(\d+)\.(\d+)\.(\d+)\s+/) {
-    # OpenSSL 1.0
-    $openssl_version_flavour = $1;
-    $openssl_version_major = $2;
-    $openssl_version_minor = $3;
-    $openssl_version_fix   = $4;
-    print "OpenSSL version: major=$openssl_version_major, minor=$openssl_version_minor, fix=$openssl_version_fix\n";
-} else {
-    print "Problem: malformed openssl version string!\n";
-    print STDERR "Consider setting OPENSSL_PREFIX correctly.\n\n";
-    exit 1;
-}
-
-# Warn on old openssl - should work but lacks support for some features
-if ($openssl_version_major == 0 &&
-    $openssl_version_minor == 9 &&
-    $openssl_version_fix   == 8
-) {
-    print STDERR "Warning: openssl 0.9.8 found - this will work but lacks some features, e.g. server side key generation!";
-
-} elsif ( $openssl_version_flavour =~ m/LibreSSL/i ) {
-    print STDERR "Warning: LibreSSL found, support for LibreSSL is experimental!";
-
-} elsif (not
-    ($openssl_version_flavour =~ m/OpenSSL/i &&
-     $openssl_version_major == 1 &&
-     (($openssl_version_minor == 0) || ($openssl_version_minor == 1) ))
-) {
-    print STDERR "\n";
-    print STDERR "ERROR: OpenSSL 0.9.8, 1.0 or 1.1 is required.\n";
-    print STDERR "Consider setting OPENSSL_PREFIX correctly.\n\n";
-    exit 1;
-}
-
-# make OpenSSL binary location available to tests
-open my $fh, ">", File::Spec->catfile("t", "cfg.binary.openssl");
-print $fh $openssl_binary;
-close $fh;
-
+my $fh;
 
 ###########################################################################
 # determine OpenXPKI version
@@ -285,8 +166,8 @@ unlink('test');
 WriteMakefile(
     'NAME'      => 'OpenXPKI',
     'VERSION'   => $openxpki_version,
-    'LIBS'      => ["-L$openssl_lib_dir -lcrypto"],
-    'INC'       => "-I. -I$openssl_inc_dir",
+    'LIBS'      => ["-lcrypto"],
+    'INC'       => "-I.",
     'CCFLAGS'   => '-O2 -g '.$Config{ccflags},
     'PREREQ_PM' => {
         'Archive::Zip'                  => 0,
@@ -320,10 +201,11 @@ WriteMakefile(
         'Devel::NYTProf'                => 0,           # CPAN
         'English'                       => '1',         # for broken Perl installations like on Ubuntu Drapper
         'Exception::Class'              => '1.22',
-        'Feature::Compat::Try'          => '0.05',
+        'Feature::Compat::Try'          => '0.05',      # 0.5 is included in Debian Bookworm
         'File::Which'                   => '1.27',      # docker-test.pl
         'HTML::Entities'                => 0,
         'Import::Into'                  => '1.002005',  # OpenXPKI::Debug
+        'IO::Pty::Easy'                 => '0.10',      # OpenXPKI::Server::ProcTerminal::Process (EE code)
         'IO::Prompt'                    => '0.099004',  # for deployment tools
         'JSON'                          => 0,
         'JSON::PP'                      => '4.02',      # rpc.fcgi; 4.02000-1 is included in Debian Buster
@@ -334,6 +216,7 @@ WriteMakefile(
         'Math::BigInt'                  => '1.9993',    # makes FreeBSD happy
         'MIME::Entity'                  => 0,
         'Module::Load'                  => '0.32',      # OpenXPKI::Server::Database
+        'Mojolicious'                   => '9.31',      # 9.31 is included in Debian Bookworm
         'Moose'                         => '1',
         'MooseX::InsideOut'             => '0.106',     # OpenXPKI::Crypto::Secret::Split etc.
         'MooseX::NonMoose'              => 0,           # OpenXPKI::Server::Workflow::Validator::PasswordQuality
@@ -349,10 +232,10 @@ WriteMakefile(
         'Proc::Daemon'                  => '0.23',
         'Proc::ProcessTable'            => '0.43',
         'Proc::SafeExec'                => '1.4',
+        'Prometheus::Tiny::Shared'      => '0.026',
         'Regexp::Common'                => '2',
         'SOAP::Lite'                    => 0,
         'SQL::Abstract::More'           => '1.38',      # OpenXPKI::Server::Database
-        'Sub::Exporter'                 => 0,           # OpenXPKI::MooseParams
         'Sys::SigAction'                => '0.06',
         'Template'                      => '2.15',
         'Test::More'                    => '1.001008',
@@ -360,7 +243,7 @@ WriteMakefile(
         'Test::Pod'                     => '1.00',
         'Text::CSV_XS'                  => '0.23',
         'Time::HiRes'                   => '1',
-        'Try::Tiny'                     => '0.28',
+        'Type::Tiny'                    => '2.000001',
         'URI::Escape'                   => 0,           # should be part of the core modules but who knows
         'Workflow'                      => '1.60',
         'YAML::Tiny'                    => '1.69',
@@ -368,18 +251,9 @@ WriteMakefile(
     'test' => {
         'TESTS' => 't/*/*.t',
     },
-    'macro' => {
-        'OPENSSL_BINARY' => $openssl_binary,
-    },
     'clean' => {
         'FILES' => [
-            't/50_auth/cgisess_*',
-            't/*/*.db', 't/30_dbi/sqlite.db._*',
             'OpenXPKI/VERSION.pm',
-            't/25_crypto/ca1', 't/25_crypto/ca2',
-            't/25_crypto/token_test.xml', 't/50_auth/auth_test.xml', 't/config_test.xml',
-            't/28_log/openxpki.log',
-            't/cfg.binary.openssl',
         ],
     },
     'XSPROTOARG' => '-noprototypes',
@@ -388,6 +262,7 @@ WriteMakefile(
         'bin/openxpkicmd',
         'bin/openxpkiadm',
         'bin/openxpkicli',
+        'bin/oxi',
     ],
     %flags,
 );

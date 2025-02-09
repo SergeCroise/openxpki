@@ -4,7 +4,6 @@ use base qw( OpenXPKI::Service );
 
 use strict;
 use warnings;
-use utf8;
 use English;
 use List::Util qw( first );
 
@@ -23,6 +22,7 @@ use OpenXPKI::Server;
 use OpenXPKI::Server::Session;
 use OpenXPKI::Server::Context qw( CTX );
 use Log::Log4perl::MDC;
+use Data::UUID;
 
 
 my %state_of :ATTR;     # the current state of the service
@@ -30,6 +30,8 @@ my %state_of :ATTR;     # the current state of the service
 my %max_execution_time  : ATTR( :set<max_execution_time> );
 
 my %api :ATTR; # API instance
+
+my $UUID = Data::UUID->new;
 
 sub init {
     my $self  = shift;
@@ -105,6 +107,7 @@ sub __is_valid_message : PRIVATE {
             'NEW_SESSION',
             'DETACH_SESSION',
             'GET_ENDPOINT_CONFIG',
+            'GET_REALM_LIST',
         ],
         'SESSION_ID_SENT' => [
             'PING',
@@ -146,6 +149,7 @@ sub __is_valid_message : PRIVATE {
             'GET_PASSWD_LOGIN',
             'GET_CLIENT_LOGIN',
             'GET_X509_LOGIN',
+            'GET_OIDC_LOGIN',
             'NEW_SESSION',
             'CONTINUE_SESSION',
             'DETACH_SESSION',
@@ -159,6 +163,7 @@ sub __is_valid_message : PRIVATE {
             'CONTINUE_SESSION',
             'DETACH_SESSION',
             'RESET_SESSIONID',
+            'GET_REALM_LIST',
         ],
     };
 
@@ -326,20 +331,7 @@ sub __handle_PING : PRIVATE {
         };
     }
     elsif ($state_of{$ident} eq 'WAITING_FOR_PKI_REALM') {
-        my @realm_names = CTX('config')->get_keys("system.realms");
-        my %realms =();
-        foreach my $realm (sort @realm_names) {
-            my $label = CTX('config')->get("system.realms.$realm.label");
-            $realms{$realm}->{NAME} = $realm;
-            $realms{$realm}->{LABEL} = $label;
-            $realms{$realm}->{DESCRIPTION} = CTX('config')->get("system.realms.$realm.description") || $label;
-        }
-        return {
-           SERVICE_MSG => 'GET_PKI_REALM',
-           PARAMS => {
-              'PKI_REALMS' => \%realms,
-           },
-        };
+        return $self->__list_pki_realms;
     }
     elsif ($state_of{$ident} eq 'WAITING_FOR_AUTHENTICATION_STACK') {
         return $self->__list_authentication_stacks();
@@ -383,24 +375,13 @@ sub __handle_SESSION_ID_ACCEPTED : PRIVATE {
     # message for the user and set the state to
     # 'WAITING_FOR_PKI_REALM'
     # we only do this if we are in a 'SESSION_ID_SENT.*' state
-    if ($pki_realm_choice
-        && $state_of{$ident} =~ m{\A SESSION_ID_SENT.* \z}xms) {
-        ##! 2: "build hash with ID, name and description"
-        my @realm_names = CTX('config')->get_keys("system.realms");
-        my %realms =();
-        foreach my $realm (sort @realm_names) {
-            $realms{$realm}->{NAME} = $realm;
-            $realms{$realm}->{DESCRIPTION} = CTX('config')->get("system.realms.$realm.label");
-        }
+
+    # TODO: checking $state_of{$ident} is not necessary as this is already checked via __is_valid_message()
+    if ($pki_realm_choice and $state_of{$ident} =~ m{\A SESSION_ID_SENT.* \z}xms) {
         $self->__change_state({
             STATE => 'WAITING_FOR_PKI_REALM',
         });
-        return {
-            SERVICE_MSG => 'GET_PKI_REALM',
-            PARAMS => {
-                'PKI_REALMS' => \%realms,
-            },
-        };
+        return $self->__list_pki_realms;
     }
 
     # if we do not have an authentication stack in the session,
@@ -517,6 +498,13 @@ sub __handle_GET_X509_LOGIN : PRIVATE {
     return $self->__handle_login( shift );
 }
 
+sub __handle_GET_OIDC_LOGIN : PRIVATE {
+    ##! 1: 'start'
+    my $self = shift;
+
+    return $self->__handle_login( shift );
+}
+
 sub __handle_LOGOUT : PRIVATE {
     ##! 1: 'start'
     my $self    = shift;
@@ -591,6 +579,14 @@ sub __handle_GET_ENDPOINT_CONFIG : PRIVATE {
 }
 
 
+sub __handle_GET_REALM_LIST : PRIVATE {
+    ##! 1: 'start'
+    my $self    = shift;
+    my $ident   = ident $self;
+    return { PARAMS => CTX('api2')->get_realm_list() };
+}
+
+
 sub __handle_COMMAND : PRIVATE {
     ##! 1: 'start'
     my $self    = shift;
@@ -600,6 +596,8 @@ sub __handle_COMMAND : PRIVATE {
     my $command = $data->{PARAMS}->{COMMAND};
     my $params = $data->{PARAMS}->{PARAMS};
     my $api_version = $data->{PARAMS}->{API} || 2;
+    my $timeout = $data->{PARAMS}->{TIMEOUT} || $max_execution_time{$ident};
+    my $request_id = $data->{PARAMS}->{REQUEST_ID};
 
     OpenXPKI::Exception->throw(
         message => 'I18N_OPENXPKI_SERVICE_DEFAULT_COMMAND_COMMAND_MISSING',
@@ -610,28 +608,35 @@ sub __handle_COMMAND : PRIVATE {
         params  => $data->{PARAMS},
     ) unless $api_version =~ /^2$/;
 
+    Log::Log4perl::MDC->put('rid', $request_id) if $request_id;
+
     # API2 instance
     # (late initialization because CTX('config') needs CTX('session'), i.e. logged in user)
     if (not $api{$ident}) {
+        CTX('log')->system->debug("Initialization internal API for client command processing");
         my $enable_acls = not CTX('config')->get(['api','acl','disabled']);
         $api{$ident} = OpenXPKI::Server::API2->new(
             enable_acls => $enable_acls,
             acl_rule_accessor => sub { CTX('config')->get_hash(['api','acl', CTX('session')->data->role]) },
+            log => CTX('log')->system,
         );
     }
 
     my $result;
+    my $metric_id;
     eval {
-        CTX('log')->system->debug("Executing command $command");
+        # create command ID
+        my ($id) = split /-/, $UUID->create_str; # take only first part of UUID
+
+        CTX('log')->system->debug("Executing client command '$command' (call id = $id)");
 
         # execution timeout
         my $sh;
 
-        my $timeout = $data->{PARAMS}->{TIMEOUT} || $max_execution_time{$ident};
         if ($timeout) {
             ##! 16: 'running command with timeout of ' . $timeout
             $sh = set_sig_handler( 'ALRM' ,sub {
-                CTX('log')->system->error("Service command ".$command." was aborted after " . $timeout);
+                CTX('log')->system->error("Client command '$command' was aborted after ${timeout}s");
                 CTX('log')->system->trace("Call was " . Dumper $data->{PARAMS} );
                 OpenXPKI::Exception::Timeout->throw(
                     message => "Command took too long to - aborted!",
@@ -650,16 +655,26 @@ sub __handle_COMMAND : PRIVATE {
             ) if (@violated);
         }
 
+        Log::Log4perl::MDC->put('command_id', $id);
+        $metric_id = CTX('metrics')->start("service_command_seconds", { command => $command }) if CTX('metrics')->do_histogram_metrics;
+
         # execute command enclosed with DBI transaction
         CTX('dbi')->start_txn();
         $result = $api{$ident}->dispatch(command => $command, params => $params);
         CTX('dbi')->commit();
 
+        CTX('metrics')->stop($metric_id) if ($metric_id);
+
         # reset timeout
         sig_alarm(0) if $sh;
     };
 
+    Log::Log4perl::MDC->put('command_id', undef);
+    Log::Log4perl::MDC->put('rid', undef);
+
     if (my $error = $EVAL_ERROR) {
+        CTX('metrics')->stop($metric_id) if ($metric_id);
+
         # rollback DBI (should not matter as we throw exception anyway)
         CTX('dbi')->rollback();
 
@@ -693,6 +708,7 @@ sub __pki_realm_choice_available : PRIVATE {
     my $realm = OpenXPKI::Server::Context::hascontext('session')
         ? CTX('session')->data->pki_realm
         : undef;
+    # TODO: this method should only return 0 or 1 and the realm return value is not used in our code
     return $realm if defined $realm;
 
     ##! 2: "check if there is more than one realm"
@@ -713,18 +729,42 @@ sub __pki_realm_choice_available : PRIVATE {
     else { # more than one PKI realm available
         return 1;
     }
-
-    return 0;
 }
 
 sub __list_authentication_stacks : PRIVATE {
     my $self = shift;
 
-    my $authentication = CTX('authentication');
     return {
         SERVICE_MSG => 'GET_AUTHENTICATION_STACK',
         PARAMS => {
-            'AUTHENTICATION_STACKS' => $authentication->list_authentication_stacks(),
+            'AUTHENTICATION_STACKS' => CTX('authentication')->list_authentication_stacks(),
+        },
+    };
+}
+
+sub __list_pki_realms : PRIVATE {
+    my $self = shift;
+
+    my @realm_names = CTX('config')->get_keys("system.realms");
+    my %realms;
+    foreach my $realm (sort @realm_names) {
+        my $label = CTX('config')->get("system.realms.$realm.label");
+
+        $realms{$realm} = {
+            NAME => $realm,
+            LABEL => $label,
+            DESCRIPTION => CTX('config')->get("system.realms.$realm.description") || '',
+            IMAGE => CTX('config')->get("system.realms.$realm.image") || '',
+            COLOR => CTX('config')->get("system.realms.$realm.color") || '',
+            # auth stack info is needed to display stack label on realm selection page
+            AUTH_STACKS => CTX('authentication')->list_authentication_stacks_of($realm),
+        };
+    }
+
+    return {
+        SERVICE_MSG => 'GET_PKI_REALM',
+        PARAMS => {
+            'PKI_REALMS' => \%realms,
         },
     };
 }
@@ -940,13 +980,13 @@ sub __send_error
                 }
             }
 
-            if ($class eq 'OpenXPKI::Exception::InputValidator') {
+            if ($class->isa('OpenXPKI::Exception::InputValidator')) {
                 $error->{ERRORS} = $params->{EXCEPTION}->{errors};
             }
         }
     }
 
-    CTX('log')->system->debug('Sending error ' . Dumper $error);
+    CTX('log')->system->trace('Sending error ' . Dumper $error) if CTX('log')->system->is_trace;
 
     return $self->talk({
         SERVICE_MSG => "ERROR",

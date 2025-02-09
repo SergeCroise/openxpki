@@ -1,5 +1,5 @@
 package OpenXPKI::Server::API2::Plugin::Token::is_token_usable;
-use OpenXPKI::Server::API2::EasyPlugin;
+use OpenXPKI -plugin;
 
 =head1 NAME
 
@@ -76,15 +76,22 @@ command "is_token_usable" => {
     }
     my $token_type = $types{$1};
 
-    my $token = CTX('crypto_layer')->get_token({ TYPE => $token_type, NAME => $params->alias });
+    my $token;
+    eval { $token = CTX('crypto_layer')->get_token({ TYPE => $token_type, NAME => $params->alias }); };
+    if (!$token) {
+        CTX('log')->application()->error('Unable to get token from TokenManager');
+        return;
+    }
 
     my $operation;
+    my $padding_config = {};
     if ($params->engine) {
         $operation = 'engine';
     } elsif ($params->operation) {
         $operation = $params->operation;
     } elsif ($token_type eq 'datasafe') {
         $operation = 'encrypt';
+        $padding_config = CTX('config')->get_hash(["system","datavault","padding"]) // {};
     } else {
         $operation = 'sign';
     }
@@ -99,7 +106,7 @@ command "is_token_usable" => {
         return $usable;
     }
 
-    return OpenXPKI::Server::API2::Plugin::Token::Util->is_token_usable($token, $operation);
+    return OpenXPKI::Server::API2::Plugin::Token::Util->is_token_usable($token, $operation, $padding_config);
 };
 
 __PACKAGE__->meta->make_immutable;

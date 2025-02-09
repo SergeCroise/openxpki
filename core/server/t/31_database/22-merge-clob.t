@@ -2,7 +2,7 @@ use strict;
 use warnings;
 use English;
 use Test::More;
-use Test::Deep;
+use Test::Deep ':v1';
 use Test::Exception;
 use FindBin qw( $Bin );
 
@@ -29,7 +29,7 @@ my $db = DatabaseTest->new(
     data => [
         [ 1, "chirpychirpycheepcheepchirp" ],
     ],
-    test_only => ['oracle'],
+    test_only => ['Oracle'],
 );
 
 #

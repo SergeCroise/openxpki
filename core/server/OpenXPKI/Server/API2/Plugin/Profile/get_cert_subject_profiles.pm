@@ -1,5 +1,5 @@
 package OpenXPKI::Server::API2::Plugin::Profile::get_cert_subject_profiles;
-use OpenXPKI::Server::API2::EasyPlugin;
+use OpenXPKI -plugin;
 
 =head1 NAME
 
@@ -35,6 +35,8 @@ command "get_cert_subject_profiles" => {
     showall => { isa => 'Bool', default => 0, },
 } => sub {
     my ($self, $params) = @_;
+
+    CTX('log')->deprecated->error('API command "get_cert_subject_profiles" is deprecated, please use "get_cert_profiles" with parameter "with_subject_styles" instead');
 
     my $profile = $params->profile;
 

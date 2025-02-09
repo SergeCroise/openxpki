@@ -1,5 +1,5 @@
 package OpenXPKI::Server::API2::Plugin::Profile::get_field_definition;
-use OpenXPKI::Server::API2::EasyPlugin;
+use OpenXPKI -plugin;
 
 =head1 NAME
 
@@ -10,6 +10,7 @@ OpenXPKI::Server::API2::Plugin::Profile::get_field_definition
 =cut
 
 # Project modules
+use OpenXPKI::Debug;
 use OpenXPKI::Server::Context qw( CTX );
 use OpenXPKI::Server::API2::Plugin::Profile::Util;
 

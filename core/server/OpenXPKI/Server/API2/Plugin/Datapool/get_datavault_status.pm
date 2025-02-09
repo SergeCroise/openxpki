@@ -1,5 +1,5 @@
 package OpenXPKI::Server::API2::Plugin::Datapool::get_datavault_status;
-use OpenXPKI::Server::API2::EasyPlugin;
+use OpenXPKI -plugin;
 
 with 'OpenXPKI::Server::API2::Plugin::Datapool::Util';
 
@@ -15,7 +15,7 @@ use English;
 # Project modules
 use OpenXPKI::Debug;
 use OpenXPKI::Server::Context qw( CTX );
-use OpenXPKI::Server::API2::Types;
+use OpenXPKI::Types;
 use OpenXPKI::Server::API2::Plugin::Token::Util;
 
 =head1 COMMANDS
@@ -83,15 +83,16 @@ command "get_datavault_status" => {
     };
 
     if ($params->check_online) {
-        ##! 32: 'Do online check '
-        my $safe_token = CTX('crypto_layer')->get_token({ TYPE => 'datasafe', 'NAME' => $safe_id})
-            or OpenXPKI::Exception->throw(
+        if ($key_info->{datapool_value}) {
+            ##! 32: 'Do online check '
+            my $safe_token = CTX('crypto_layer')->get_token({ TYPE => 'datasafe', 'NAME' => $safe_id});
+
+            OpenXPKI::Exception->throw(
                 message => 'Token for safe_id not available',
                 params => { token_id  => $safe_id }
-            );
-        # this gets the encrypted aes key parameters and decrpyts it
-        # without using any caches so we can be sure that the token works
-        if ($key_info->{datapool_value}) {
+            ) unless($safe_token);
+            # this gets the encrypted aes key parameters and decrpyts it
+            # without using any caches so we can be sure that the token works
             my $decrypted;
             my $key_enc = $self->get_entry( $pki_realm, 'sys.datapool.keys', $key_info->{datapool_value} );
             eval{
@@ -99,7 +100,7 @@ command "get_datavault_status" => {
             };
             $ret->{online} = ($EVAL_ERROR || !$decrypted) ? 0 : 1;
         } else {
-            $ret->{online} = OpenXPKI::Server::API2::Plugin::Token::Util->is_token_usable($safe_token, 'encrypt') ? 1 : 0;
+            $ret->{online} = $self->api->is_token_usable(alias => $safe_id) ? 1 : 0;
         }
     }
 

@@ -1,5 +1,5 @@
 package OpenXPKI::Server::API2::Plugin::Secret::set_secret_part;
-use OpenXPKI::Server::API2::EasyPlugin;
+use OpenXPKI -plugin;
 
 =head1 NAME
 
@@ -8,12 +8,13 @@ OpenXPKI::Server::API2::Plugin::Secret::set_secret_part
 =cut
 
 # CPAN modules
-use Try::Tiny;
 
 # Project modules
 use OpenXPKI::Server::Context qw( CTX );
-use OpenXPKI::Server::API2::Types;
+use OpenXPKI::Types;
 
+# Feature::Compat::Try should be done last to safely disable warnings
+use Feature::Compat::Try;
 
 
 =head1 COMMANDS
@@ -55,13 +56,14 @@ command "set_secret_part" => {
             group => $params->secret,
             $params->has_part ? (part => $params->part) : (),
         });
-    } catch {
+    }
+    catch ($err) {
         CTX('log')->audit('system')->warn("incorrect secret given", {
             group => $params->secret,
             $params->has_part ? (part => $params->part) : (),
-            error => "$_",
+            error => "$err",
         });
-        die $_;
+        die $err;
     };
 
     return 1;

@@ -1,5 +1,5 @@
 package OpenXPKI::Server::API2::Plugin::Cert::get_cert_attributes;
-use OpenXPKI::Server::API2::EasyPlugin;
+use OpenXPKI -plugin;
 
 =head1 NAME
 
@@ -10,7 +10,7 @@ OpenXPKI::Server::API2::Plugin::Cert::get_cert_attributes
 # Project modules
 use OpenXPKI::Debug;
 use OpenXPKI::Server::Context qw( CTX );
-use OpenXPKI::Server::API2::Types;
+use OpenXPKI::Types;
 
 with 'OpenXPKI::Server::API2::TenantRole';
 
@@ -40,7 +40,7 @@ SQL search string(s) to filter the list of returned attributes. Will
 be applied with SQL LIKE operator, so "%" wildcards are allowed.
 Optional.
 
-=item * C<tenant> I<Str>
+=item * C<tenant> L<Tenant|OpenXPKI::Types/Tenant> - tenant
 
 =back
 
@@ -48,7 +48,7 @@ Optional.
 command "get_cert_attributes" => {
     identifier => { isa => 'Base64', required => 1, },
     attribute  => { isa => 'ArrayRefOrStr', coerce => 1 },
-    tenant  => { isa => 'Str', },
+    tenant  => { isa => 'Tenant', },
 } => sub {
     my ($self, $params) = @_;
 

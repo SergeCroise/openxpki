@@ -1,14 +1,12 @@
 package OpenXPKI::Random;
 use Moose;
 
-use utf8;
-
 use OpenXPKI::Debug;
 use OpenXPKI::Exception;
 use OpenXPKI::Server::Context qw( CTX );
 use MIME::Base64;
 
-use POSIX;
+use Fcntl qw( :DEFAULT ); # import F_* and O_* constants
 
 =head1 OpenXPKI::Random
 
@@ -25,12 +23,6 @@ has token => (
         return CTX('api2')->get_default_token();
     },
 );
-
-sub BUILD {
-    my $self = shift;
-    my $args = shift;
-
-}
 
 =head1 Configuration
 
@@ -58,7 +50,7 @@ The call expects three positional parameters:
 The number of random bytes, this is NOT the length of the string received.
 This argument is mandatory.
 
-=item I<base64|hex|bin>
+=item I<base64|hex|bin|base64url>
 
 The encoding of the returned data.
 The default is I<base64>.
@@ -112,6 +104,8 @@ sub get_random {
 
     if ($format eq 'base64') {
         $rand = encode_base64($rand, '');
+    } elsif ($format eq 'base64url') {
+        $rand = MIME::Base64::encode_base64url($rand, '');
     } elsif ($format eq 'hex') {
         $rand = unpack('H*', $rand);
     }

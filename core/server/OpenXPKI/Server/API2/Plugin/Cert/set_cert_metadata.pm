@@ -1,5 +1,6 @@
 package OpenXPKI::Server::API2::Plugin::Cert::set_cert_metadata;
-use OpenXPKI::Server::API2::EasyPlugin;
+use OpenXPKI -plugin;
+use OpenXPKI;
 
 =head1 NAME
 
@@ -8,10 +9,8 @@ OpenXPKI::Server::API2::Plugin::Cert::set_cert_metadata
 =cut
 
 # Project modules
-use OpenXPKI::Debug;
 use OpenXPKI::Server::Context qw( CTX );
-use OpenXPKI::Server::API2::Types;
-use OpenXPKI::Server::Database; # to get AUTO_ID
+use OpenXPKI::Types;
 
 =head1 COMMANDS
 
@@ -89,6 +88,7 @@ command "set_cert_metadata" => {
     my $mode = $params->mode;
     my $dbi = CTX('dbi');
 
+    my $log = CTX('log')->application();
     ##! 16: $cert_identifier
     ##! 16: $params->attribute
 
@@ -107,7 +107,7 @@ command "set_cert_metadata" => {
         # and https://rt.cpan.org/Public/Bug/Display.html?id=97541
         if ($value =~ m{ \A (-|\.|e|\+) \z }x) {
             $value = 'n/a';
-            CTX('log')->application()->debug(sprintf ('Replace metadata dash/dot by verbose "n/a" on %s / %s',
+            $log->debug(sprintf ('Replace metadata dash/dot by verbose "n/a" on %s / %s',
                     $cert_identifier, $key));
         }
         $dbi->insert(
@@ -138,6 +138,17 @@ command "set_cert_metadata" => {
         OpenXPKI::Exception->throw( message => "Attribute value for key $key is not scalar or array" )
             unless (ref $value eq '' || ref $value eq 'ARRAY');
 
+        # deduplicate input list
+        if (ref $value) {
+            my $oldsize = scalar @$value;
+            my %tmp = map { $_ => 1 } @$value;
+            $value = [ keys %tmp ];
+            if ($oldsize != scalar @$value) {
+                $log->info(sprintf("Removed %01d duplicate items for key $key",
+                    (scalar @$value) - $oldsize));
+            }
+        }
+
         # Load existings items
         my $attr = CTX('api2')->get_cert_attributes(
             identifier => $cert_identifier,
@@ -151,24 +162,27 @@ command "set_cert_metadata" => {
         if (!$item) {
             ##! 32: '  -> no item found, plain insert'
             if (!ref $value) {
-                $insert_item->( $key, $value);
+                $insert_item->( $key, $value );
+                $log->info("Certificate metadata '$key': append (set) '$value'");
                 next KEY;
             }
             foreach my $val (@{$value}) {
                 $insert_item->( $key, $val );
+                $log->info("Certificate metadata '$key': append (set) '$val'");
             }
             next KEY;
         }
 
         if ($mode eq 'skip') {
             ##! 32: '  -> item found in "skip" mode'
+            $log->info("Certificate metadata '$key': skip (item already exists)");
             next KEY;
         }
 
         if ($mode eq 'error') {
             ##! 64: '  -> error: item found in "error" mode'
             OpenXPKI::Exception->throw(
-                message => "Tried to set values for $key but items already exist"
+                message => "Tried to set values for '$key' but items already exist"
             );
         }
 
@@ -189,9 +203,11 @@ command "set_cert_metadata" => {
             # mark to keep
             if (exists $existing{$val}) {
                 $existing{$val} = 1;
+                $log->info("Certificate metadata '$key': skip (value '$val' already exists)");
             # insert
             } else {
                 push @add, $val;
+                $log->info("Certificate metadata '$key': append (merge) '$val'");
             }
         }
 
@@ -221,10 +237,11 @@ command "set_cert_metadata" => {
             $dbi->delete(
                 from => 'certificate_attributes',
                 where => {
+                    identifier           => $cert_identifier,
                     attribute_contentkey => 'meta_'.$key,
                     attribute_value      => \@delete,
                 }
-            );
+            ) if (@delete);
         }
 
         # create new entries for all items in @add

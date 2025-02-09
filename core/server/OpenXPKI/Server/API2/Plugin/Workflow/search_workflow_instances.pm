@@ -1,5 +1,7 @@
 package OpenXPKI::Server::API2::Plugin::Workflow::search_workflow_instances;
-use OpenXPKI::Server::API2::EasyPlugin;
+use OpenXPKI -plugin;
+
+with 'OpenXPKI::Server::API2::TenantRole';
 
 =head1 NAME
 
@@ -8,14 +10,14 @@ OpenXPKI::Server::API2::Plugin::Workflow::search_workflow_instances
 =cut
 
 # CPAN modules
-use Moose::Util::TypeConstraints;
+use Moose::Util::TypeConstraints; # PLEASE NOTE: this enables all warnings via Moose::Exporter
 
 # Project modules
 use OpenXPKI::Debug;
 use OpenXPKI::DateTime;
 use OpenXPKI::Server::Context qw( CTX );
-use OpenXPKI::Server::API2::Types;
-with 'OpenXPKI::Server::API2::TenantRole';
+use OpenXPKI::Types;
+use OpenXPKI::Util;
 
 subtype 'StateName',
     as 'Str',
@@ -67,7 +69,7 @@ B<Parameters>
 
 =item * C<pki_realm> I<Str> - PKI realm
 
-=item * C<tenant> I<Str>
+=item * C<tenant> L<Tenant|OpenXPKI::Types/Tenant> - tenant
 
 Search for workflows of the given tenant, fallback to the primary
 tenant if not given, unfiltered search if set to the emtpy string.
@@ -347,8 +349,7 @@ sub _make_query_params {
             $cond->{OPERATOR} //= 'EQUAL';
             # sanitize wildcards (don't overdo it...)
             if ($cond->{OPERATOR} eq 'LIKE') {
-                $cond->{VALUE} =~ s/\*/%/g;
-                $cond->{VALUE} =~ s/%%+/%/g;
+                $cond->{VALUE} = OpenXPKI::Util->asterisk_to_sql_wildcard($cond->{VALUE});
             }
             # TODO #legacydb search_workflow_instances' ATTRIBUTE allows old DB layer syntax
             $where->{ "$table_alias.attribute_value" } =

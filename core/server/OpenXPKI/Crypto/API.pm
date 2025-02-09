@@ -9,6 +9,7 @@ use warnings;
 use English;
 
 use Class::Std;
+use Module::Load ();
 
 use OpenXPKI::Debug;
 use OpenXPKI::Exception;
@@ -40,8 +41,8 @@ sub START {
     my $class = $arg_ref->{CLASS};
     delete $arg_ref->{CLASS};
 
-    eval "require $class";
-    if ($EVAL_ERROR ne '') {
+    eval { Module::Load::load($class) };
+    if ($EVAL_ERROR) {
         ##! 4: "compilation of driver " . $class . " failed\n$EVAL_ERROR"
         OpenXPKI::Exception->throw(
             message => 'I18N_OPENXPKI_CRYPTO_API_EVAL_ERROR',
@@ -280,6 +281,16 @@ sub get_key_info
     return $self->get_instance()->get_engine()->get_key_info();
 }
 
+sub get_key_object
+{
+    ##! 1: 'start'
+    my $self  = shift;
+    my $ident = ident $self;
+    ##! 16: 'engine: ' . $self->get_instance()->get_engine()
+    return if (!defined $self->get_instance()->get_engine());
+    return $self->get_instance()->get_engine()->get_key_object();
+}
+
 sub get_certfile
 {
     my $self = shift;
@@ -303,7 +314,7 @@ OpenXPKI::Crypto::API - API for cryptographic functions - abstract superclass.
 =head1 Description
 
 This is the ABSTRACT superclass for crypto APIs, such as
-OpenXPKI::Crypto::Backend::API, OpenXPKI::Crypto::Tool::SCEP::API, ...
+OpenXPKI::Crypto::Backend::API.
 As an abstract superclass, it just implements basic command validation,
 more functionality has to be implemented in the specific subclasses.
 Note that it can not be instantiated.
@@ -338,4 +349,3 @@ be inapropriate for the requested operation.
 =head1 See also:
 
 OpenXPKI::Crypto::Backend::API - API for generic crypto backends
-OpenXPKI::Tool::SCEP::API      - API for the SCEP tool

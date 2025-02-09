@@ -34,6 +34,8 @@ sub reset {
             dbi              => undef,
             dbi_log          => undef,
             bedroom          => undef,
+            terminal         => undef,
+            metrics          => undef,
 
             # user-settable
             api            => undef,
@@ -273,11 +275,10 @@ somebody tries to set an object that has already been attached.
 
 Usage:
 
-  # attach this server object and the API to the global context
-  OpenXPKI::Server::Context::setcontext({
-    server => $self,
-    api2   => OpenXPKI::Server::API2->new(),
-  });
+    # attach the API object to the global context
+    OpenXPKI::Server::Context::setcontext({
+        'test' => OpenXPKI::Server::Test->new,
+    });
 
 =head2 hascontext
 

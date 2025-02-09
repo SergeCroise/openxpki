@@ -21,7 +21,20 @@ backendPath: cgi-bin/webui.fcgi
 #   #application { margin: 0 auto -30px; }
 #   #footer { height: 30px; padding-top: 5px; background-color: #000000; }
 #
-customCssPath: custom.css
+customCSSPath: custom.css
+
+#
+# Custom CSS declarations that will be directly included into the HTML header.
+#
+customCSS: |-
+    .oxi-realm-card-democa,
+    .oxi-realm-democa .oxi-header-bar {
+        background-color: #DDFFFF;
+    }
+    .oxi-realm-card-rootca,
+    .oxi-realm-rootca .oxi-header-bar {
+        background-color: #FFDDDD;
+    }
 
 #
 # Page title (browser title bar)
@@ -31,7 +44,7 @@ pageTitle: "OpenXPKI - Open Source Trustcenter"
 #
 # Year shown in footer (unless footer is replaced using "footer")
 #
-copyrightYear: 2021
+copyrightYear: 2024
 
 #
 # Site header
@@ -56,7 +69,7 @@ header:
 #
 footer: |-
     <p class="text-center text-muted credit">
-        &copy; Copyright 2021
+        &copy; Copyright 2024
         &ndash; <a href="http://www.openxpki.org/">The OpenXPKI Project</a>
     </p>
 

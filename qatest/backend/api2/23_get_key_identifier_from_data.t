@@ -10,7 +10,7 @@ use MIME::Base64;
 
 # CPAN modules
 use Test::More;
-use Test::Deep;
+use Test::Deep ':v1';
 use Test::Exception;
 
 # Project modules
@@ -30,7 +30,7 @@ my $tempdir = $oxitest->testenv_root;
 my $dbdata = $oxitest->certhelper_database;
 
 SKIP: {
-    skip "OpenSSL executable not found", 2 if not `sh -c 'commands -v openssl'`;
+    skip "OpenSSL executable not found", 2 if not `sh -c 'command -v openssl'`;
     my $pkcs10;
     my $private_key;
     lives_ok {

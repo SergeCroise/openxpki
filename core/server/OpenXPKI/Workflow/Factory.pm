@@ -7,14 +7,18 @@ use Workflow 1.36;
 use base qw( Workflow::Factory );
 use English;
 use Scalar::Util qw( blessed );
+use Type::Params qw( signature_for );
 
 use OpenXPKI::Exception;
 use OpenXPKI::Debug;
 use OpenXPKI::Server::Context qw( CTX );
 use OpenXPKI::Server::Workflow;
 use OpenXPKI::Workflow::Context;
-use OpenXPKI::MooseParams;
+use OpenXPKI::Workflow::Field;
 use Workflow::Exception qw( configuration_error workflow_error );
+
+# should be done after imports to safely disable warnings in Perl < 5.36
+use experimental 'signatures';
 
 sub new {
     my $class = ref $_[0] || $_[0];
@@ -42,6 +46,7 @@ sub _create_wf {
         $context = OpenXPKI::Workflow::Context->new();
     }
 
+    CTX('metrics')->inc(workflow_create => { type => $wf_type });
     return $self->SUPER::create_workflow( $wf_type, $context, 'OpenXPKI::Server::Workflow' );
 }
 
@@ -145,10 +150,6 @@ sub get_action_info {
     foreach my $field_name (@input) {
         my $field = $self->get_field_info( $field_name, $wf_name );
         ##! 64: 'Field info: ' . Dumper $field
-
-        $field->{type} = 'text' unless ($field->{type});
-        $field->{clonable} = (defined $field->{min} || $field->{max}) || 0;
-
         push @fields, $field;
     }
 
@@ -163,108 +164,45 @@ sub get_field_info {
     my $wf_name = shift;
     ##! 1: 'start'
 
-    my $conn = CTX('config');
+    my $config = CTX('config');
 
     my @field_path;
     # Fields can be defined local or global (only actions inside workflow)
     if ($wf_name) {
         @field_path = ( 'workflow', 'def', $wf_name, 'field', $field_name );
-        if (!$conn->exists( \@field_path )) {
+        if (!$config->exists( \@field_path )) {
             @field_path = ( 'workflow', 'global', 'field', $field_name );
         }
     } else {
         @field_path = ( 'workflow', 'global', 'field', $field_name );
     }
 
-    my $field = $conn->get_hash( \@field_path );
+    my $field = $config->get_hash( \@field_path );
 
     # set field's context key to the field name
     $field->{name} //= $field_name;
 
-    # Check for option tag and do explicit calls to ensure recursive resolving.
-    # This code is duplicated in OpenXPKI::Server::API2::Plugin::Profile::Util
-    # as we need the same syntax in the profiles
-    # TODO move to common API
-    if ($field->{option}) {
-        my $mode = $conn->get( [ @field_path, 'option', 'mode' ] ) || 'list';
-        my @option;
-        if ($mode eq 'keyvalue') {
-            @option = $conn->get_list( [ @field_path, 'option', 'item' ] );
-            if (my $label = $conn->get( [ @field_path, 'option', 'label' ] )) {
-                @option = map { { label => sprintf($label, $_->{label}, $_->{value}), value => $_->{value} } } @option;
-            }
-        } else {
-            my @item;
-            if ($mode eq 'keys' || $mode eq 'map') {
-                @item = sort $conn->get_keys( [ @field_path, 'option', 'item' ] );
-            } else {
-                # option.item holds the items as list, this is mandatory
-                @item = $conn->get_list( [ @field_path, 'option', 'item' ] );
-            }
-
-            if ($mode eq 'map') {
-                # Expects 'item' to be a link to a deeper hash structure where each
-                # hash item has a key "label" set. Hides items with an empty label.
-                foreach my $key (@item) {
-                    my $label = $conn->get( [ @field_path, 'option', 'item', $key, 'label' ] );
-                    next unless ($label);
-                    push @option, { value => $key, label => $label };
-                }
-            } elsif (my $label = $conn->get( [ @field_path, 'option', 'label' ] )) {
-                # if set, we generate the values from option.label + key
-                @option = map { { value => $_, label => $label.'_'.uc($_) } } @item;
-
-            } else {
-                # the minimum default - use keys as labels
-                @option = map { { value => $_, label => $_  } } @item;
-            }
-        }
-        $field->{option} = \@option;
-    }
-
-    # add ECMA equivalent of the regex (duplicated in OpenXPKI::Server::API2::Plugin::Profile::Util->get_input_elements)
-    if ($field->{match}) {
-        my $ecma_match = $self->_perlre_to_ecma($field->{match});
-        $field->{ecma_match} = $ecma_match if $ecma_match;
-    }
-
-    return $field;
-
-}
-
-# Static method.
-# Tries to convert a Perl RegEx (given as string) into an ECMA compatible version.
-# Returns nothing if the Perl RegEx contains special sequences that cannot be
-# translated.
-sub _perlre_to_ecma {
-    # allow this sub to be called like AA->bb, AA::bb and $a->bb
-    my $perl_re = shift; # might be $obj or __PACKAGE__
-    $perl_re = shift if ($perl_re and (blessed $perl_re or $perl_re eq __PACKAGE__));
-
-    # stop if Perl RegEx contains non-translatable sequences
-    return if (
-        $perl_re =~ / (?<!\\) (\\\\)* \\([luLUxpPNoQEraevhGXK]|[04]\d+)/x # special escape sequences
-        or $perl_re =~ / ^\[:[^\:\]]+:\] /x # character classes
+    OpenXPKI::Workflow::Field->process(
+        field => $field,
+        config => $config,
+        path => \@field_path,
     );
 
-    my $ecma_re = $perl_re;
-    $ecma_re =~ s/ (?<!\\) (\\\\)* \s+ /$1 || ''/gxe; # remove whitespace after even number of backslashes (or none)
-    $ecma_re =~ s/ \\ (\s+) /$1/gx;            # remove backslash of escaped whitespace
-    $ecma_re =~ s/^\\A/^/;                     # \A -> ^
-    $ecma_re =~ s/\\[zZ]$/\$/;                 # \z -> $
-
-    return $ecma_re;
+    return $field;
 }
 
 # Returns a HashRef with configuration details (actions, states) of the given
 # workflow type and state.
-sub get_action_and_state_info {
-    my ($self, $type, $state, $actions, $context) = positional_args(\@_,   # OpenXPKI::MooseParams
-        { isa => 'Str', },
-        { isa => 'Str', },
-        { isa => 'ArrayRef', },
-        { isa => 'HashRef|Undef', optional => 1, default => sub { {} } },
-    );
+signature_for get_action_and_state_info => (
+    method => 1,
+    positional => [
+        'Str',
+        'Str',
+        'ArrayRef',
+        'Optional[ HashRef | Undef ]', { default => {} },
+    ],
+);
+sub get_action_and_state_info ($self, $type, $state, $actions, $context) {
     ##! 4: 'start'
 
     my $head = CTX('config')->get_hash([ 'workflow', 'def', $type, 'head' ]);

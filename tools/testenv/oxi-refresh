@@ -65,8 +65,8 @@ OPTIONS
     --no-compile
         Skip compiling XS code parts.
 
-    --no-dbconf
-        Skip database configuration.
+    --no-ee
+        Skip enterprise code.
 
     --fast
         Shortcut for "--no-i18n --no-compile --no-dbconfig".
@@ -83,37 +83,60 @@ set -e
 # Command line options
 #
 IS_RESTART=1
-IS_DBCONFIG=1
 IS_FULLCONFIG=0
 oxi_install_params=()
 # Bash string manipulation: use # to strip text off $@ and see if string still equals original $@
 [[ "${@#--no-restart}" != "$@" ]] && IS_RESTART=0
-[[ "${@#--no-dbconf}" != "$@" ]]  && IS_DBCONFIG=0
-[[ "${@#--fast}" != "$@" ]]       && IS_DBCONFIG=0 && oxi_install_params+=(--fast)
-[[ "${@#--full}" != "$@" ]]       && IS_FULLCONFIG=1
+[[ "${@#--fast}" != "$@" ]]       && oxi_install_params+=(--fast)
 [[ "${@#--full}" != "$@" ]]       && IS_FULLCONFIG=1
 [[ "${@#--no-i18n}" != "$@" ]]    && oxi_install_params+=(--no-i18n)
 [[ "${@#--no-compile}" != "$@" ]] && oxi_install_params+=(--no-compile)
+[[ "${@#--no-ee}" != "$@" ]]      && oxi_install_params+=(--no-ee)
 
-echo "[$([ "$IS_FULLCONFIG" -eq 1 ] && echo "X" || echo " ")] Overwrite /etc/openxpki, recreate DB and certs"
-echo "[$([ "$IS_DBCONFIG" -eq 1 ] && echo "X" || echo " ")] Write database configuration file"
+echo "[$([ "$IS_FULLCONFIG" -eq 1 ] && echo "X" || echo " ")] Recreate DB and certs, wipe config"
 echo "[$([ "$IS_RESTART" -eq 1 ] && echo "X" || echo " ")] Restart OpenXPKI & Apache"
 echo
 
+# stop OpenXPKI early to prevent crashes due to DB access problems etc.
+if [[ $IS_RESTART -eq 1 ]]; then
+    set +e
+    openxpkictl stop >>$LOG 2>&1
+    set -e
+fi
+
 #
-# Copy current code and realm CA-ONE config
+# Configuration (copy and modify)
 #
 
 # fully overwrite existing config
 if [[ $IS_FULLCONFIG -eq 1 ]]; then
-    echo "Write complete OpenXPKI config into /etc/openxpki"
-    rsync -a --delete $OXI_TEST_SAMPLECONFIG_DIR/* /etc/openxpki/ >>$LOG 2>&1
-    rsync -a --delete $OXI_TEST_SAMPLECONFIG_DIR/contrib/local/* /etc/openxpki/local/ >>$LOG 2>&1
+    echo "Wipe any existing config and keys in /etc/openxpki"
+    rm -rf /etc/openxpki
+
+# keep keys and additional files
+else
+    echo "Update OpenXPKI config in /etc/openxpki"
+
+    # remove workflow/def
+    echo "- remove existing workflows"
+    for realm_dir in /etc/openxpki/config.d/realm/*; do
+        rm -rf "$realm_dir/workflow/def"
+    done
+
+    # copy config/ to /etc/openxpki
+    echo "- copy config"
+    pushd $OXI_TEST_SAMPLECONFIG_DIR > /dev/null
+        DESTDIR= make install >>$LOG 2>&1
+    popd > /dev/null
 
     chmod 750              /etc/openxpki/config.d
     chown -R root:openxpki /etc/openxpki/config.d
+
+    mv /etc/openxpki/local/keys /tmp/openxpki-keys
+    rsync -a --delete $OXI_TEST_SAMPLECONFIG_DIR/contrib/local/* /etc/openxpki/local/ >>$LOG 2>&1
     chmod 750              /etc/openxpki/local
     chown -R root:openxpki /etc/openxpki/local
+    mv /tmp/openxpki-keys /etc/openxpki/local/keys
 
     # set en_US as default language to get correct I18N translations (e.g. in rpc.fcgi)
     sed -ri 's/^(\s*default_language:).*/\1 en_US/' /etc/openxpki/config.d/system/server.yaml
@@ -130,15 +153,6 @@ if [[ $IS_FULLCONFIG -eq 1 ]]; then
     sed -ri 's/^(#\s*)?(DataSource\s*=).*/\2 dbi:MariaDB:dbname=openxpki;host=127.0.0.1/' /etc/openxpki/webui/default.conf
     sed -ri 's/^(#\s*)?(User\s*=).*/\2 openxpki_session/' /etc/openxpki/webui/default.conf
     sed -ri 's/^(#\s*)?(Password\s*=).*/\2 mysecret/' /etc/openxpki/webui/default.conf
-
-# partial config update
-else
-    # realm democa
-    echo "Update demo realm in /etc/openxpki/config.d/realm/democa"
-    rsync -a --delete \
-      $OXI_TEST_SAMPLECONFIG_DIR/config.d/realm/democa/* \
-      /etc/openxpki/config.d/realm/democa/                             >>$LOG 2>&1
-    chown -R root:openxpki /etc/openxpki/config.d/realm/democa/        >>$LOG 2>&1
 fi
 
 set +e
@@ -149,7 +163,16 @@ if [ $test_auth_exists -eq 0 ]; then
     echo "- add authentication stack 'Testing'"
     # add test auth stack (e.g. user: raop / password: openxpki)
     sed -zri 's/^/Testing:\n    handler: TestAccounts\n    type: passwd\n\n/' /etc/openxpki/config.d/realm/democa/auth/stack.yaml
-    cat <<__HANDLER >> /etc/openxpki/config.d/realm/democa/auth/handler.yaml
+fi
+
+# add "tenant: { type: Base }" to "RA Operator"
+#sed -zri 's/(RA Operator[^\n]+\n([\t ]+[^\n]+\n)+)/\1    tenant:\n        type: Base\n/' /etc/openxpki/config.d/realm/democa/auth/roles.yaml
+
+# remove probably existing TestAccounts
+sed -zri 's/(TestAccounts:\n([\t ]+[^\n]+\n|\n)+)//' /etc/openxpki/config.d/realm.tpl/auth/handler.yaml
+
+# add our TestAccounts
+cat <<__HANDLER >> /etc/openxpki/config.d/realm/democa/auth/handler.yaml
 
 TestAccounts:
     type: Password
@@ -158,32 +181,38 @@ TestAccounts:
         caop:
             digest: "{ssha}JQ2BAoHQZQgecmNjGF143k4U2st6bE5B"
             role: CA Operator
+            realname: Christina Op
+            email: ca@example.org
         raop:
             digest: "{ssha}JQ2BAoHQZQgecmNjGF143k4U2st6bE5B"
             role: RA Operator
+            realname: Richard Alfred Op
+            email: ra@example.org
+            tenant:
+                - Alice Group
+                - Bob the Builder
         user:
             digest: "{ssha}JQ2BAoHQZQgecmNjGF143k4U2st6bE5B"
             role: User
+            realname: User No. 1
+            email: user@example.org
 __HANDLER
-fi
 
 # set /var/tmp instead of /tmp (where only root has write access)
 sed -ri 's/(LOCATION:)\s*\/tmp.*/\1 \/var\/tmp/g' /etc/openxpki/config.d/realm/democa/publishing.yaml
 
 # database setup
-if [[ $IS_DBCONFIG -eq 1 ]]; then
-    echo "- configure MariaDB as database"
-    cat <<__DB > /etc/openxpki/config.d/system/database.yaml
-    main:
-        debug: 0
-        type: MariaDB
-        host: $OXI_TEST_DB_MYSQL_DBHOST
-        port: $OXI_TEST_DB_MYSQL_DBPORT
-        name: $OXI_TEST_DB_MYSQL_NAME
-        user: $OXI_TEST_DB_MYSQL_USER
-        passwd: $OXI_TEST_DB_MYSQL_PASSWORD
+echo "- configure MariaDB as database"
+cat <<__DB > /etc/openxpki/config.d/system/database.yaml
+main:
+    debug: 0
+    type: MariaDB2
+    host: $OXI_TEST_DB_MYSQL_DBHOST
+    port: $OXI_TEST_DB_MYSQL_DBPORT
+    name: $OXI_TEST_DB_MYSQL_NAME
+    user: $OXI_TEST_DB_MYSQL_USER
+    passwd: $OXI_TEST_DB_MYSQL_PASSWORD
 __DB
-fi
 
 #
 # Compile and install OpenXPKI
@@ -197,8 +226,13 @@ $(dirname $0)/oxi-install "${oxi_install_params[@]}" | sed -u 's/^/    /mg'
 echo -e "\nDisable version check"
 sed -zri 's/depend:\s*\n\s+core:[^\n]+\n//' /etc/openxpki/config.d/system/version.yaml
 
+# Set user and group to root (allows to e.g. run under a /root/.plenv environment)
+echo -e "Set user and group to 'root'"
+sed -ri 's/^(user:)\s*.*/\1 root/' /etc/openxpki/config.d/system/server.yaml
+sed -ri 's/^(group:)\s*.*/\1 root/' /etc/openxpki/config.d/system/server.yaml
+
 # configure web server
-echo -e "\nConfigure Apache web server"
+echo -e "Configure Apache web server"
 cat $OXI_TEST_SAMPLECONFIG_DIR/contrib/apache2-openxpki-site.conf \
  | perl -pe 's{^(\s*RewriteRule \^\.\*\$ https://)}{#$1}'\
  > /etc/apache2/sites-available/openxpki.conf

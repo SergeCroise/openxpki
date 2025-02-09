@@ -1,5 +1,5 @@
 package OpenXPKI::Server::API2::Plugin::UI::get_menu;
-use OpenXPKI::Server::API2::EasyPlugin;
+use OpenXPKI -plugin;
 
 =head1 NAME
 
@@ -9,7 +9,7 @@ OpenXPKI::Server::API2::Plugin::UI::get_menu
 
 # Project modules
 use OpenXPKI::Server::Context qw( CTX );
-use OpenXPKI::Server::API2::Types;
+use OpenXPKI::Types;
 
 
 
@@ -17,8 +17,8 @@ use OpenXPKI::Server::API2::Types;
 
 =head2 get_menu
 
-Returns the UI menu definition (I<HashRef>) for the current role (or for pseudo
-role I<_default> if there is no config for the current role).
+Returns the UI menu and page definitions (I<HashRef>) for the current role (or
+for pseudo role I<_default> if there is no configuration for the current role).
 
 =cut
 command "get_menu" => {

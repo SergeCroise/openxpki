@@ -1,5 +1,5 @@
 package OpenXPKI::Server::API2::Plugin::Crypto::get_key_identifier_from_data;
-use OpenXPKI::Server::API2::EasyPlugin;
+use OpenXPKI -plugin;
 
 =head1 NAME
 
@@ -12,7 +12,7 @@ use Digest::SHA qw(sha1_hex);
 
 # Project modules
 use OpenXPKI::Server::Context qw( CTX );
-use OpenXPKI::Server::API2::Types;
+use OpenXPKI::Types;
 use OpenXPKI::Crypt::PKCS10;
 
 =head1 COMMANDS

@@ -10,7 +10,7 @@ use MIME::Base64;
 
 # CPAN modules
 use Test::More;
-use Test::Deep;
+use Test::Deep ':v1';
 use Test::Exception;
 
 # Project modules
@@ -111,6 +111,7 @@ lives_and {
         'cert_attributes' => {
             'meta_email'            => [ re(qr/^.+$/) ],        # [ 'andreas.anders@mycompany.local' ],
             'meta_entity'           => [ re(qr/^.+$/) ],        # [ 'nicetest-63a0ee.openxpki.test' ]
+            'meta_owner_contact'    => [ re(qr/^.+$/) ],        # [ 'andreas.anders@mycompany.local' ],
             'meta_requestor'        => [ re(qr/^.+$/) ],        # [ 'Andreas Anders' ],
             'subject_alt_name'      => array_each( re(qr/^.+$/) ),
             'system_cert_owner'     => [ re(qr/^\w+$/) ],       # [ 'user' ],
@@ -142,6 +143,7 @@ lives_and {
     cmp_deeply $result, {
         'meta_email'            => [ re(qr/^.+$/) ],        # [ 'andreas.anders@mycompany.local' ],
         'meta_entity'           => [ re(qr/^.+$/) ],        # [ 'nicetest-63a0ee.openxpki.test' ]
+        'meta_owner_contact'    => [ re(qr/^.+$/) ],        # [ 'andreas.anders@mycompany.local' ],
         'meta_requestor'        => [ re(qr/^.+$/) ],        # [ 'Andreas Anders' ],
         'subject_alt_name'      => array_each( re(qr/^.+$/) ),
         'system_cert_owner'     => [ re(qr/^\w+$/) ],       # [ 'user' ],

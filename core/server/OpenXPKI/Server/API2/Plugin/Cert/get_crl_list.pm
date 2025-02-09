@@ -1,5 +1,5 @@
 package OpenXPKI::Server::API2::Plugin::Cert::get_crl_list;
-use OpenXPKI::Server::API2::EasyPlugin;
+use OpenXPKI -plugin;
 
 =head1 NAME
 
@@ -11,7 +11,7 @@ OpenXPKI::Server::API2::Plugin::Cert::get_crl_list
 use OpenXPKI::Debug;
 use MIME::Base64;
 use OpenXPKI::Server::Context qw( CTX );
-use OpenXPKI::Server::API2::Types;
+use OpenXPKI::Types;
 
 
 =head1 COMMANDS

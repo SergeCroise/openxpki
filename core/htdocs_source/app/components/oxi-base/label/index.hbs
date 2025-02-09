@@ -1,0 +1,36 @@
+{{~#each (arrayify @text) as |txt|~}}
+    <span class="{{@class}} {{this.cssClasses}}">
+        {{#if @tooltip}}
+            <Tippy
+                @delay={{array this.config.tooltipDelay 50}}
+                @placement="top-start"
+            >
+                {{@tooltip}}
+            </Tippy>
+        {{else if @raw_tooltip}}
+            <Tippy
+                @delay={{array this.config.tooltipDelay 50}}
+                @placement="top-start"
+            >
+                {{defuse @raw_tooltip}}
+            </Tippy>
+        {{else if @tooltip_page}}
+            <Tippy
+                @delay={{array this.config.tooltipDelay 50}}
+                @placement="top-start"
+                @onShow={{this.fetchTooltip}}
+            >
+                {{#if this.tooltipContent}}
+                    <OxiSection @content={{this.tooltipContent}}/>
+                {{else}}
+                    <span class="glyphicon glyphicon-refresh spin"></span>
+                {{/if}}
+            </Tippy>
+        {{/if}}
+    {{#if @raw}}
+        {{defuse txt}}
+    {{else}}
+        {{txt}}
+    {{/if}}
+    </span>
+{{~/each~}}

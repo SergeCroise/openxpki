@@ -7,12 +7,13 @@ use base qw( OpenXPKI::Server::Workflow::Activity );
 use OpenXPKI::Server::Context qw( CTX );
 use OpenXPKI::Exception;
 use OpenXPKI::Debug;
-use OpenXPKI::Serialization::Simple;
 use OpenXPKI::DateTime;
 use DateTime;
 use Template;
 use Workflow::Exception qw( workflow_error configuration_error );
 
+# Feature::Compat::Try should be done last to safely disable warnings
+use Feature::Compat::Try;
 
 sub execute {
     ##! 1: 'start'
@@ -68,20 +69,20 @@ sub execute {
         CTX('log')->application()->info('Delete (implicit) datapool entry for key '.$params->{key}.' in namespace '.$params->{namespace});
         return 1;
 
-    } elsif (ref $params->{ value }) {
-        ##! 32: 'its a ref! ' . ref $params->{ value }
-        ##! 64: $params->{ value }
-        # Datapool handles only scalar values so we need to serialize
-        # any non scalar items
-        workflow_error ('Datapool value is not a scalar - set the serialize parameter to enable automatic serialization')
-            unless($self->param('serialize'));
-        $params->{ value } = OpenXPKI::Serialization::Simple->new()->serialize( $params->{ value } );
     }
 
-    ##! 32: 'Params ' . Dumper $params
-    CTX('api2')->set_data_pool_entry(%$params);
+    try {
+        if (ref $params->{value} and $self->param('serialize')) {
+            $params->{serialize} = 'simple';
+        }
+        ##! 32: 'Params ' . Dumper $params
+        CTX('api2')->set_data_pool_entry(%$params);
+    }
+    catch ($err) {
+        workflow_error($err);
+    }
 
-    CTX('log')->application()->info('Set datapool entry for key '.$params->{key}.' in namespace '.$params->{namespace});
+    CTX('log')->application->info('Set datapool entry: key = '.$params->{key}.', namespace = '.$params->{namespace});
 
     return 1;
 }
@@ -99,12 +100,9 @@ Sets an entry in the Datapool.
 
 =head1 Configuration
 
-=head2 Parameters
+=head2 Mandatory Parameters
 
-In the activity definition, the following parameters must be set. The syntax
-using the I<ds_> prefix is deprecated, use the I<_map> syntax to load key and
-value from the context. It is not allowed to mix prefixed and non-prefixed
-parameters!
+namespace key encrypt force value
 
 =over 8
 
@@ -123,13 +121,6 @@ encrypted. [optional - default is I<0>]
 
 Causes the set action to overwrite an existing entry.
 
-=item expiration_date
-
-Sets expiration date of the datapool entry to the specified value.
-The value should be a time specification recognized by OpenXPKI::DateTime
-autodetection. (such as '+000001', which means one day), a terse data or
-epoch. See OpenXPKI::DateTime::get_validity for details.
-
 =item key
 
 The value used as datapool key, use I<_map> syntax to use values from context!
@@ -142,6 +133,12 @@ datapool. If the value is not a scalar you must set the I<serialize>
 attribute to enable automatic serialization, otherwise the call will fail
 with an error.
 
+=back
+
+=head2 Optional Parameters
+
+=over 8
+
 =item pki_realm
 
 The realm of the datapool item to load, default is the current realm.
@@ -150,18 +147,19 @@ B<Note:> For security reasons it is not allowed to load items from other
 realms except from special I<system> realms. The only system realm
 defined for now is I<_global> which is available from all other realms.
 
+=item expiration_date
+
+Sets expiration date of the datapool entry to the specified value.
+The value should be a time specification recognized by OpenXPKI::DateTime
+autodetection. (such as '+000001', which means one day), a terse data or
+epoch. See OpenXPKI::DateTime::get_validity for details.
+
 =item serialize
 
 Boolean, if set the value is serialized so it is possible to store
 non-scalar items in the datapool.
 
 =back
-
-=head2 Arguments
-
-The workflow action requires two parameters that are passed via the
-workflow context. The names are set above with the I<key> and
-I<value> parameters.
 
 =head2 Example
 

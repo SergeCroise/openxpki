@@ -8,7 +8,6 @@ use Encode;
 
 # CPAN modules
 use Workflow::Exception qw( validation_error );
-use Try::Tiny;
 
 # Project modules
 use OpenXPKI::Debug;
@@ -50,11 +49,10 @@ sub _validate {
 
         if ($regex) {
             my @value = ref $val ? @{$val} : ($val);
-            $regex = qr/$regex/;
             foreach my $vv (@value) {
                 # skip empty
                 next if (!defined $vv || $vv eq '');
-                next if ($vv =~ $regex);
+                next if ($vv =~ m{$regex}xs);
                 ##! 8: "$field - regex $regex failed on value '$vv'"
                 push @no_value, { name => $field, error => "I18N_OPENXPKI_UI_VALIDATOR_REGEX_FAILED" };
                 last;
@@ -68,6 +66,7 @@ sub _validate {
         }
 
         # check for empty string
+        # (this needs to be done after the array processing)
         if ($is_required and $val eq '') {
             ##! 32: "$field - empty string"
             push @no_value, { name => $field, error => "I18N_OPENXPKI_UI_VALIDATOR_EMPTY_BUT_REQUIRED" };
@@ -87,7 +86,7 @@ __END__
 
 =head1 NAME
 
-OpenXPKI::Server::Workflow::Validator::BasicFieldType;
+OpenXPKI::Server::Workflow::Validator::BasicFieldType
 
 =head1 DESCRIPTION
 

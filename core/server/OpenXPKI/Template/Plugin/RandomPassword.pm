@@ -2,8 +2,6 @@ package OpenXPKI::Template::Plugin::RandomPassword;
 
 use strict;
 use warnings;
-use utf8;
-
 use base qw( Template::Plugin );
 use Template::Plugin;
 
@@ -41,11 +39,11 @@ sub generate {
     }
 
     if (defined $args->{callback}) {
-        my $callback = eval "$args->{callback}";
+        my $callback = $args->{callback};
         if (ref $callback eq 'CODE') {
             eval {
-            $_ = $password;
-            &$callback($password, $rv);
+                $_ = $password;
+                &$callback($password, $rv);
             };
         }
     }

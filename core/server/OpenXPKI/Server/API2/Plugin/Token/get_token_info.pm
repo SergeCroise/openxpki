@@ -1,5 +1,5 @@
 package OpenXPKI::Server::API2::Plugin::Token::get_token_info;
-use OpenXPKI::Server::API2::EasyPlugin;
+use OpenXPKI -plugin;
 
 =head1 NAME
 
@@ -30,7 +30,6 @@ B<Parameters>
 =cut
 command "get_token_info" => {
     alias  => { isa => 'AlphaPunct', required => 1, },
-
 } => sub {
     my ($self, $params) = @_;
 
@@ -49,7 +48,15 @@ command "get_token_info" => {
 
     my $token = CTX('crypto_layer')->get_token({ TYPE => $token_type, NAME => $params->alias });
 
-    $token->get_key_info();
+    my $info = $token->get_key_info();
+
+    $info->{token_type} = $token_type;
+
+    # if th token exposes a cert we add the identifier
+    if ($info->{key_cert}) {
+        $info->{key_cert_identifier} = $self->api->get_cert_identifier( cert => $info->{key_cert} );
+    }
+    return $info;
 };
 
 __PACKAGE__->meta->make_immutable;

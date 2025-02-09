@@ -25,7 +25,7 @@ sub init_index {
     my $empty = 1;
     foreach my $issuer (@$issuers) {
 
-        $self->logger()->trace("Issuer: " . Dumper $issuer) if $self->logger->is_trace;
+        $self->log->trace("Issuer: " . Dumper $issuer) if $self->log->is_trace;
 
         my $crl_list = $self->send_command_v2( 'get_crl_list' , {
             format => 'DBINFO',
@@ -35,14 +35,14 @@ sub init_index {
         });
 
         my $crl_hash = $crl_list->[0];
-        $self->logger()->trace("result: " . Dumper $crl_list) if $self->logger->is_trace;
+        $self->log->trace("result: " . Dumper $crl_list) if $self->log->is_trace;
 
         if (!@$crl_list) {
 
             $self->main->add_section({
                 type => 'text',
                 content => {
-                    label => $self->_escape($issuer->{subject}),
+                    label => $issuer->{subject},
                     description => 'I18N_OPENXPKI_UI_CRL_NONE_FOR_CA'
                 }
             });
@@ -54,7 +54,7 @@ sub init_index {
             $self->main->add_section({
                 type => 'keyvalue',
                 content => {
-                    label => $self->_escape($issuer->{subject}),
+                    label => $issuer->{subject},
                     description => '',
                     data => \@fields,
                     buttons => [{
@@ -89,11 +89,11 @@ sub init_list {
         identifier => scalar $self->param('issuer'),
     });
 
-    $self->logger()->trace("result: " . Dumper $crl_list) if $self->logger->is_trace;
+    $self->log->trace("result: " . Dumper $crl_list) if $self->log->is_trace;
 
     $self->set_page(
         label => 'I18N_OPENXPKI_UI_CRL_LIST_FOR_ISSUER ',
-        description => $self->_escape( $issuer_info->{subject} ),
+        description => $issuer_info->{subject},
     );
 
     my @result;
@@ -112,8 +112,8 @@ sub init_list {
         className => 'crl',
         content => {
             actions => [{
+                page => 'crl!detail!crl_key!{crl_key}',
                 label => 'I18N_OPENXPKI_UI_CRL_VIEW_IN_BROWSER',
-                path => 'crl!detail!crl_key!{crl_key}',
                 target => 'popup',
             }],
             columns => [
@@ -147,7 +147,7 @@ sub init_detail {
         format => 'DBINFO',
         crl_serial => $crl_key,
     });
-    $self->logger()->trace("result: " . Dumper $crl_hash) if $self->logger->is_trace;
+    $self->log->trace("result: " . Dumper $crl_hash) if $self->log->is_trace;
 
     $self->set_page(
         label => 'I18N_OPENXPKI_UI_CRL_LIST_VIEW_DETAIL #' . $crl_hash->{crl_number},
@@ -222,7 +222,7 @@ sub __print_detail {
     }
 
     my $crl_key = $crl_hash->{crl_key};
-    my $base =  $self->_client()->_config()->{'scripturl'} . "?page=crl!download!crl_key!$crl_key!format!";
+    my $base =  $self->_client->script_url . "?page=crl!download!crl_key!$crl_key!format!";
     my $pattern = '<li><a href="'.$base.'%s" target="_blank">%s</a></li>';
 
     push @fields, { label => 'Download', value => '<ul class="list-unstyled">'.

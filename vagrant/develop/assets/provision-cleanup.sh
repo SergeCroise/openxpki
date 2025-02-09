@@ -1,12 +1,10 @@
 #!/bin/bash
 # Cleanup
+set -euo pipefail
 
-ROOTDIR="$(dirname "$0")"; mountpoint -q /vagrant && ROOTDIR=/vagrant/assets
-. "$ROOTDIR/functions.sh"
+SCRIPTDIR="$(dirname "$0")"
+. "$SCRIPTDIR/functions.sh"
 
-#
-# Cleanup
-#
 set +e
 
 echo "Clean up Docker"

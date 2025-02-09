@@ -14,37 +14,101 @@ use Encode;
 use CGI 4.08 qw( -utf8 );
 use HTML::Entities;
 use JSON;
-use Moose::Util::TypeConstraints;
+use Moose::Util::TypeConstraints; # PLEASE NOTE: this enables all warnings via Moose::Exporter
 use Data::UUID;
 use Crypt::JWT qw( encode_jwt );
 use Crypt::PRNG;
+use Type::Params qw( signature_for );
 
 # Project modules
-use OpenXPKI::i18n qw( i18nTokenizer );
+use OpenXPKI::i18n qw( i18n_walk );
 use OpenXPKI::Serialization::Simple;
 use OpenXPKI::Client::UI::Response;
 
+# should be done after imports to safely disable warnings in Perl < 5.36
+use experimental 'signatures';
 
 # Attributes set via constructor
-
-has req => (
-    is => 'ro',
-    isa => 'OpenXPKI::Client::UI::Request',
-    predicate => 'has_req',
-    required => 1,
-);
-
-has extra => (
-    is => 'rw',
-    isa => 'HashRef',
-    default => sub { {} },
-);
 
 has _client => (
     is => 'ro',
     isa => 'OpenXPKI::Client::UI',
     init_arg => 'client',
     required => 1,
+);
+
+=head1 REQUEST RELATED METHODS
+
+=head2 param
+
+Returns a single input parameter value, i.e.
+
+=over
+
+=item * secure parameters passed in a (server-side) JWT encoded hash,
+
+=item * those appended to the action name using C<!> and
+
+=item * real CGI parameters.
+
+=back
+
+A parameter name will be looked up in the listed order.
+
+If the input parameter is a list (multiple values) then only the first value is
+returned.
+
+B<Parameters>
+
+=over
+
+=item * I<Str> C<$key> - parameter name to retrieve.
+
+=back
+
+=head2 secure_param
+
+Returns an input parameter that was encrypted via JWT and can thus be trusted.
+
+Encryption might happen either by calling the special virtual page
+C<encrypted!JWT_TOKEN> or with a form field of C<type: encrypted>.
+
+C<undef> is returned if the parameter does not exist or it was not an encrypted
+parameter.
+
+B<Parameters>
+
+=over
+
+=item * I<Str> C<$key> - parameter name to retrieve.
+
+=back
+
+=head2 multi_param
+
+Returns a list with an input parameters' values (multi-value field, most
+likely a clonable field).
+
+B<Parameters>
+
+=over
+
+=item * I<Str> C<$key> - parameter name to retrieve.
+
+=back
+
+=cut
+
+has req => (
+    is => 'ro',
+    isa => 'OpenXPKI::Client::UI::Request',
+    predicate => 'has_req',
+    required => 1,
+    handles => [ qw(
+        param
+        multi_param
+        secure_param
+    ) ],
 );
 
 =head1 RESPONSE RELATED ATTRIBUTES AND METHODS
@@ -82,12 +146,6 @@ Set the structure of the main contents.
     $self->main->add_form(...);
 
 C<add_form> receives constructor parameters for L<OpenXPKI::Client::UI::Response::Section::Form>.
-
-=head2 infobox
-
-Set the structure of the right hand side info box.
-
-Usage equivalent to L</main>.
 
 =head2 language
 
@@ -190,6 +248,12 @@ Set user related information.
     # set several attributes at once
     $self->set_user(%{ $user });
 
+=head2 pki_realm
+
+Set the current PKI realm.
+
+    $self->pki_realm($realm);
+
 =head2 add_header
 
 Add one or more HTTP response headers.
@@ -225,7 +289,6 @@ has resp => (
     handles => [ qw(
         redirect
         confined_response has_confined_response
-        infobox
         language
         main
         menu
@@ -237,6 +300,7 @@ has resp => (
         status
         tenant
         user set_user
+        pki_realm
         add_header
         get_header_str
         raw_bytes has_raw_bytes raw_bytes_callback has_raw_bytes_callback
@@ -268,12 +332,6 @@ has type => (
     is => 'ro',
     isa => 'Str',
     default => 'json',
-);
-
-has _prefix_jwt => (
-    is => 'ro',
-    isa => 'Str',
-    default => '_encrypted_jwt_',
 );
 
 # Redirection (from an action_* method) to an init_* method that may live
@@ -343,7 +401,6 @@ B<Parameters>
 =back
 
 =cut
-
 sub send_command_v2 {
 
     my $self = shift;
@@ -356,18 +413,24 @@ sub send_command_v2 {
         $flags = { nostatus => 1 };
     }
 
-    my $backend = $self->_client()->backend();
+    my $backend = $self->_client->backend;
     my $reply = $backend->send_receive_service_msg(
-        'COMMAND', { COMMAND => $command, PARAMS => $params, API => 2, TIMEOUT => ($flags->{timeout} || 0 ) }
+        'COMMAND' => {
+            COMMAND => $command,
+            PARAMS => $params,
+            API => 2,
+            TIMEOUT => ($flags->{timeout} || 0),
+            REQUEST_ID => $self->req->id,
+        }
     );
     $self->_last_reply( $reply );
 
-    $self->logger()->trace('send command raw reply: '. Dumper $reply) if $self->logger->is_trace;
+    $self->log->trace("Raw backend reply to '$command': ". Dumper $reply) if $self->log->is_trace;
 
     if ( $reply->{SERVICE_MSG} ne 'COMMAND' ) {
+        $self->log->error("command $command failed ($reply->{SERVICE_MSG})");
+        $self->log->trace("command reply ". Dumper $reply) if $self->log->is_trace;
         if (!$flags->{nostatus}) {
-            $self->logger()->error("command $command failed ($reply->{SERVICE_MSG})");
-            $self->logger()->trace("command reply ". Dumper $reply) if $self->logger()->is_trace;
             $self->set_status_from_error_reply( $reply );
         }
         return undef;
@@ -391,7 +454,7 @@ sub set_status_from_error_reply {
             $message = $reply->{'ERROR'}->{LABEL};
         }
 
-        $self->logger()->error($message);
+        $self->log->error($message);
 
         if ($message !~ /I18N_OPENXPKI_UI_/) {
             if ($message =~ /I18N_OPENXPKI_([^\s;]+)/) {
@@ -404,85 +467,46 @@ sub set_status_from_error_reply {
         }
 
     } else {
-        $self->logger()->trace(Dumper $reply) if $self->logger()->is_trace;
+        $self->log->trace(Dumper $reply) if $self->log->is_trace;
     }
     $self->status->error($message);
 
     return $self;
 }
 
-=head2 param
+# Reads the query parameter "_tenant" and returns a list (tenant => $tenant) to
+# be directly included in any API call that supports the parameter "tenant".
+# Returns an empty list if no tenant is set.
+sub __tenant_param {
+    my $self = shift;
 
-Returns a single input parameter, i.e. real CGI parameters and those appended
-to the action name using C<!>. Parameters from the action name have precedence.
+    confess '__tenant_param() must be called in list context' unless wantarray; # die
 
-If the input parameter has got multiple values then only the first value is
-returned.
+    my $tenant = $self->param('_tenant');
+    return (tenant => $tenant) if ($tenant);
+    return ();
+}
+
+=head2 session_param
+
+Read or write a CGI session parameter, a shortcut to L<CGI::Session/param>.
+
+Specify only a C<$key> to read a parameter and an additional value to write it.
 
 B<Parameters>
 
 =over
 
-=item * I<Str> C<$key> - parameter name to retrieve: a plain parameter name or
-a stringified hash (e.g. C<key_param{curve_name}>).
+=item * I<Str> C<$key> - parameter name to read or write
 
-Please note that passing an I<ArrayRef> is no longer supported - please use
-L</param_from_fields> instead. Passing C<undef>is also no longer supported.
+=item * I<Str> C<$value> - optional parameter value to write
 
 =back
 
 =cut
-
-sub param {
-
-    my ($self, $key) = @_;
-
-    confess 'param() must be called in scalar context' if wantarray; # die
-
-    my @val = $self->__param($key);
-    return $val[0];
-}
-
-sub multi_param {
-
-    my ($self, $key) = @_;
-
-    confess 'multi_param() must be called in list context' unless wantarray; # die
-
-    my @val = $self->__param($key);
-    return @val;
-}
-
-sub __param {
-
-    my ($self, $key) = @_;
-
-    confess "param() / multi_param() expect a single key (string) as argument\n" if (not $key or ref $key); # die
-
-    my $prefix_jwt = $self->_prefix_jwt;
-    my @queries = (
-        # Try extra parameters appended to action
-        sub { return $self->extra->{$key} },
-        # Try parameter via request object
-        sub { return $self->req->multi_param($key) },
-    );
-
-    for my $q (@queries) {
-        my @val = $q->();
-        return @val if defined $val[0];
-    }
-
-    $self->logger->trace("Requested parameter '$key' was not found") if $self->logger->is_trace;
-    return;
-}
-
-# return a list/hash (tenant => $tenant)_from_env to be directly included
-# in any api call. Returns an empty list if tenant is not set
-sub __tenant {
+sub session_param {
     my $self = shift;
-    my $tenant = $self->param('_tenant');
-    return (tenant => $tenant) if ($tenant);
-    return ();
+    return $self->_session->param(@_);
 }
 
 sub __persist_status {
@@ -490,7 +514,7 @@ sub __persist_status {
     my $status = shift;
 
     my $session_key = $self->__generate_uid();
-    $self->_session->param($session_key, $status);
+    $self->session_param($session_key, $status);
     $self->_session->expire($session_key, 15);
 
     return '_status_id!' . $session_key;
@@ -502,46 +526,11 @@ sub __fetch_status {
     my $session_key = $self->param('_status_id');
     return unless $session_key;
 
-    my $status = $self->_session->param($session_key);
+    my $status = $self->session_param($session_key);
     return unless ($status && ref $status eq 'HASH');
 
-    $self->logger->debug("Set persisted status: " . $status->{message});
+    $self->log->debug("Set persisted status: " . $status->{message});
     return $status;
-}
-
-sub param_from_fields {
-
-    my ($self, $fields) = @_;
-
-    my $param = {};
-    foreach my $item (@{$fields}) {
-        my $name = $item->{name};
-        if ($name =~ m{ \[\] \z }xms) {
-            $self->logger()->warn("Got field name with square brackets $name");
-            $name = substr($name,0,-2);
-        }
-        next if $name =~ m{ \A wf_ }xms;
-
-        my @v_list = $self->multi_param($name);
-        my $vv;
-        if ($item->{clonable}) {
-            $vv = \@v_list;
-        } else {
-            if ((my $amount = scalar @v_list) > 1) {
-                $self->logger->warn(sprintf "Received %s values for non-clonable field '%s'", scalar @v_list, $name);
-            }
-            $vv = $v_list[0];
-        }
-
-        if ($name =~ m{ \A (\w+)\{(\w+)\} \z }xs) {
-            $param->{$1} ||= ();
-            $param->{$1}->{$2} = $vv;
-        } else {
-            $param->{$name} = $vv;
-        }
-    }
-    $self->logger()->trace( "params: " . Dumper $param ) if $self->logger->is_trace;
-    return $param;
 }
 
 =head2 log
@@ -551,7 +540,7 @@ Return the class logger (log4perl ref).
 =cut
 sub log {
     my $self = shift;
-    return $self->_client->logger;
+    return $self->_client->log;
 }
 
 =head2 logger
@@ -561,7 +550,7 @@ Deprecated alias for L</log>.
 =cut
 sub logger {
     my $self = shift;
-    return $self->_client->logger;
+    return $self->_client->log;
 }
 
 =head2 _render_body_to_str
@@ -594,23 +583,23 @@ sub _render_body_to_str {
     # B) response to a confined request, i.e. no page update (auto-complete etc.)
     #
     if ($self->has_confined_response) {
-        return i18nTokenizer(encode_json($self->confined_response));
+        return encode_json(i18n_walk($self->confined_response));
     }
 
     #
     # C) regular response
     #
-    my $result = $self->resp->resolve;
+    my $result = $self->resp->resolve; # resolve response DTOs into nested HashRef
 
     # show message of the day if we have a page section (may overwrite status)
-    if ($self->page->is_set && (my $motd = $self->_session->param('motd'))) {
-        $self->_session->param('motd', undef);
+    if ($self->page->is_set && (my $motd = $self->session_param('motd'))) {
+        $self->session_param('motd', undef);
         $result->{status} = $motd;
     }
     # add session ID
     $result->{session_id} = $self->_session->id;
 
-    return i18nTokenizer(encode_json($result));
+    return encode_json(i18n_walk($result));
 }
 
 =head2 render
@@ -624,14 +613,14 @@ sub render {
     my $cgi = $self->cgi;
 
     if (not ref $cgi) {
-        $self->logger->error("Cannot render result - CGI object not available");
-        return $self;
+        $self->log->error("Cannot render result - CGI object not available");
+        return;
     }
 
     # helper to print HTTP headers
     my $print_headers = sub {
         my $headers = $self->get_header_str($cgi);
-        $self->logger->trace("Response headers: $headers") if $self->logger->is_trace;
+        $self->log->trace("Response headers:\n$headers") if $self->log->is_trace;
         print $headers;
     };
 
@@ -640,12 +629,12 @@ sub render {
         $print_headers->();
         # A) raw bytes in memory
         if ($self->has_raw_bytes) {
-            $self->logger->debug("Sending raw bytes (in memory)");
+            $self->log->debug("Sending raw bytes (in memory)");
             print $self->raw_bytes;
         }
         # B) raw bytes retrieved by callback function
         elsif ($self->has_raw_bytes_callback) {
-            $self->logger->debug("Sending raw bytes (via callback)");
+            $self->log->debug("Sending raw bytes (via callback)");
             # run callback, passing a printing function as argument
             $self->raw_bytes_callback->(sub { print @_ });
         }
@@ -653,7 +642,7 @@ sub render {
     # Standard JSON response
     } elsif ($cgi->http('HTTP_X-OPENXPKI-Client')) {
         $print_headers->();
-        $self->logger->debug("Sending JSON response");
+        $self->log->debug("Sending JSON response");
         print $self->_render_body_to_str;
 
     # Redirects
@@ -668,123 +657,142 @@ sub render {
             $url = $self->__persist_response( { data => $body } );
         }
 
+        $self->log->debug("Raw redirect target: $url");
         # if url does not start with http or slash, prepend baseurl + route name
         if ($url !~ m{\A http|/}x) {
-            my $baseurl = $self->_session->param('baseurl');
-            $url = sprintf("%sopenxpki/%s", $baseurl, $url);
+            my $baseurl = $self->session_param('baseurl') || $cgi->param('baseurl');
+            $self->log->debug("Adding baseurl $baseurl");
+            $url = sprintf("%s/#/openxpki/%s", $baseurl, $url);
         }
-
         # HTTP redirect
-        $self->logger->debug("Sending HTTP redirect to: $url");
+        $self->log->debug("Sending HTTP redirect to: $url");
         print $cgi->redirect($url);
+
     }
-
-    return $self;
 }
 
-=head2 _escape ( string )
-
-Replace html entities in string by their encoding
-
-=cut
-sub _escape {
-
-    my $self = shift;
-    my $arg = shift;
-    return encode_entities($arg);
-
-}
-
-=head2 __register_wf_token( wf_info, token )
-
-Generates a new random id and stores the passed workflow info, expects
-a wf_info and the token info to store as parameter, returns a hashref
-with the definiton of a hidden field which can be directly
-pushed onto the field list. wf_info can be undef / empty string.
-
-=cut
-sub __register_wf_token {
+sub __wf_token_id {
 
     my $self = shift;
     my $wf_info = shift;
-    my $token = shift;
+    my $wf_args = shift // {};
 
     if (ref $wf_info) {
-        $token->{wf_id} = $wf_info->{workflow}->{id};
-        $token->{wf_type} = $wf_info->{workflow}->{type};
-        $token->{wf_last_update} = $wf_info->{workflow}->{last_update};
+        $wf_args->{wf_id} = $wf_info->{workflow}->{id};
+        $wf_args->{wf_type} = $wf_info->{workflow}->{type};
+        $wf_args->{wf_last_update} = $wf_info->{workflow}->{last_update};
     }
     my $id = $self->__generate_uid();
-    $self->logger()->debug('wf token id ' . $id);
-    $self->logger()->trace('token info ' . Dumper  $token) if $self->logger()->is_trace;
-    $self->_session->param($id, $token);
-    return { name => 'wf_token', type => 'hidden', value => $id };
+    $self->log->debug("save wf_token: $id");
+    $self->log->trace('token content = ' . Dumper $wf_args) if $self->log->is_trace;
+    $self->session_param($id, $wf_args);
+
+    return $id;
 }
 
+=head2 __wf_token_field( wf_info, more_args )
 
-=head2 __register_wf_token_initial ( wf_type, token )
+Create a workflow token that represents a C<HashRef> with data from the given
+workflow info and additional arguments.
 
-Create a token to init a new workflow, expects the name of the workflow
-as string and an optional hash to pass as initial parameters to the
-create method. Returns the full action target as string.
+The generated C<HashRef> will be stored in the session.
+
+B<Parameters>
+
+=over
+
+=item * C<$wf_info> I<HashRef> - workflow info as returned by API command
+L<get_workflow_info|OpenXPKI::Server::API2::Plugin::Workflow::get_workflow_info>. Optional
+
+=item * C<$more_args> I<HashRef> - additional parameters to store. Optional
+
+=back
+
+Returns a I<HashRef> with the definiton of a hidden field named C<"wf_info">
+which can be directly pushed onto the field list.
 
 =cut
-sub __register_wf_token_initial {
+sub __wf_token_field {
 
     my $self = shift;
     my $wf_info = shift;
-    my $wf_param = shift || {};
+    my $more_args = shift;
 
-    my $token = {
-        wf_type => $wf_info,
-        wf_param => $wf_param,
-        redirect => 1, # initial create always forces a reload of the page
+    my $id = $self->__wf_token_id($wf_info, $more_args);
+    return {
+        name => 'wf_token',
+        type => 'hidden',
+        value => $id,
     };
-
-    my $id = $self->__generate_uid();
-    $self->logger()->debug('wf token id ' . $id);
-    $self->_session->param($id, $token);
-    return  "workflow!index!wf_token!$id";
 }
 
-=head2 __fetch_wf_token( wf_token, purge )
+=head2 __wf_token_extra_param( wf_info, more_args )
 
-Return the hashref stored by __register_wf_token for the given
-token id. If purge is set to a true value, the info is purged
-from the session context.
+Create a workflow token that represents a C<HashRef> with data from the given
+workflow info and additional arguments.
+
+The generated C<HashRef> will be stored in the session.
+
+B<Parameters>
+
+=over
+
+=item * C<$wf_info> I<HashRef> - workflow info as returned by API command
+L<get_workflow_info|OpenXPKI::Server::API2::Plugin::Workflow::get_workflow_info>. Optional
+
+=item * C<$more_args> I<HashRef> - additional parameters to store. Optional
+
+=back
+
+Returns a string C<"wf_token!$token"> which can be added to e.g. a button action.
 
 =cut
-sub __fetch_wf_token {
+sub __wf_token_extra_param {
 
     my $self = shift;
-    my $id = shift;
-    my $purge = shift || 0;
+    my $wf_info = shift;
+    my $more_args = shift;
 
-    return {} unless $id;
-
-    $self->logger()->debug( "load wf_token " . $id );
-
-    my $token = $self->_session->param($id);
-    $self->_session->clear($id) if($purge);
-    return $token;
-
+    my $id = $self->__wf_token_id($wf_info, $more_args);
+    return "wf_token!${id}";
 }
 
-=head2 __purge_wf_token( wf_token )
+=head2 __resolve_wf_token( wf_token )
 
-Purge the token info from the session.
+Return the C<HashRef> that was associated with the given token via
+L<__wf_token_extra_param> or L<__wf_token_field>.
+
+=cut
+sub __resolve_wf_token {
+    my $self = shift;
+
+    my $id = $self->param('wf_token');
+    if (not $id) {
+        $self->status->error('I18N_OPENXPKI_UI_WORKFLOW_INVALID_REQUEST_ACTION_WITHOUT_TOKEN!');
+        return;
+    }
+
+    $self->log->debug("load wf_token: $id");
+    my $wf_args = $self->session_param($id);
+    $self->log->trace('token content = ' . Dumper $wf_args) if $self->log->is_trace;
+
+    return $wf_args;
+}
+
+=head2 __purge_wf_token
+
+Purge the C<HashRef> associated with the current token from the session.
 
 =cut
 sub __purge_wf_token {
-
     my $self = shift;
-    my $id = shift;
 
-    $self->logger()->debug( "purge wf_token " . $id );
+    my $id = $self->param('wf_token');
+
+    $self->log->debug("purge wf_token: $id");
     $self->_session->clear($id);
 
     return $self;
-
 }
 
 =head2 __persist_response
@@ -806,7 +814,7 @@ sub __persist_response {
     my $id = $self->__generate_uid;
     $self->log->debug('persist response ' . $id);
 
-    $self->_session->param('response_'.$id, $data );
+    $self->session_param('response_'.$id, $data );
     $self->_session->expire('response_'.$id, $expire) if $expire;
 
     return  "cache!fetch!id!$id";
@@ -825,10 +833,10 @@ sub __fetch_response {
     my $self = shift;
     my $id = shift;
 
-    $self->logger()->debug('fetch response ' . $id);
-    my $response = $self->_session->param('response_'.$id);
+    $self->log->debug('fetch response ' . $id);
+    my $response = $self->session_param('response_'.$id);
     if (!$response) {
-        $self->logger()->error( "persisted response with id $id does not exist" );
+        $self->log->error( "persisted response with id $id does not exist" );
         return;
     }
     return $response;
@@ -846,55 +854,6 @@ sub __generate_uid {
     ## RFC 3548 URL and filename safe base64
     $uid =~ tr/+\//-_/;
     return $uid;
-}
-
-=head2 __render_pager
-
-Return a pager definition hash with default settings, requires the query
-result hash as argument. Defaults can be overriden passing a hash as second
-argument.
-
-=cut
-sub __render_pager {
-
-    my $self = shift;
-    my $result = shift;
-    my $args = shift;
-
-    my $limit = ($args->{limit} * 1); # cast to integer for json
-    if (!$limit) { $limit = 50; }
-    # Safety rule
-    elsif ($limit > 500) {  $limit = 500; }
-
-    my $startat = int($args->{startat} || 0);
-
-    if (!$args->{pagesizes}) {
-        $args->{pagesizes} = [25,50,100,250,500];
-    } elsif (!ref $args->{pagesizes}) {
-        $args->{pagesizes} = [ (split /\s*,\s*/, $args->{pagesizes}) ];
-    }
-
-    if (!grep (/^$limit$/, @{$args->{pagesizes}}) ) {
-        push @{$args->{pagesizes}}, $limit;
-        $args->{pagesizes} = [ sort { $a <=> $b } @{$args->{pagesizes}} ];
-    }
-
-    if (!$args->{pagersize}) {
-        $args->{pagersize} = 20;
-    }
-
-    $self->logger()->trace('pager query' . Dumper $args) if $self->logger()->is_trace;
-
-    return {
-        startat => $startat,
-        limit =>  $limit,
-        count => $result->{count} * 1,
-        pagesizes => $args->{pagesizes},
-        pagersize => $args->{pagersize},
-        pagerurl => $result->{'type'}.'!pager!id!'.$result->{id},
-        order => $result->{query}->{order} || '',
-        reverse => $result->{query}->{reverse} ? 1 : 0,
-    }
 }
 
 =head2 __build_attribute_subquery
@@ -939,7 +898,7 @@ sub __build_attribute_subquery {
                 $val = uc($val);
             }
 
-            $self->logger()->debug( "Query: $key $operator $val" );
+            $self->log->debug( "Query: $key $operator $val" );
             push @preprocessed, $val;
         }
 
@@ -960,7 +919,7 @@ sub __build_attribute_subquery {
         }
     }
 
-    $self->logger()->trace('Attribute subquery ' . Dumper $attr) if $self->logger()->is_trace;
+    $self->log->trace('Attribute subquery ' . Dumper $attr) if $self->log->is_trace;
 
     return $attr;
 
@@ -987,7 +946,7 @@ sub __build_attribute_preset {
         my $key = $item->{key};
         my @val = $self->multi_param($key);
         while (my $val = shift @val) {
-            push @attr,  { key => $key, value => $val };
+            push @attr,  { key => $key, value => $val, label => $item->{label}//'' };
         }
     }
 
@@ -1016,50 +975,14 @@ sub transate_sql_wildcards  {
     return $val;
 }
 
-=head2 decrypted_param
-
-Return a decrypted JWT input parameter (whose only allowed type is I<HashRef>).
-
-C<undef> is returned if the parameter does not exist or if it was not encrypted.
-
-B<Parameters>
-
-=over
-
-=item * I<Str> C<$key> - parameter name to retrieve.
-
-=back
-
-=cut
-
-sub decrypted_param {
-
-    my $self = shift;
-    my $param_name = shift;
-
-    my $item = $self->param($param_name)
-        or return;
-
-    if ($item->{__jwt_key} ne $self->_session->param('jwt_encryption_key')) {
-        $self->logger->debug("Parameter '".$param_name."'' was not JWT encrypted");
-        return;
-    }
-    delete $item->{__jwt_key};
-    return $item;
-
-}
-
 # encrypt given data
 sub _encrypt_jwt {
     my ($self, $value) = @_;
 
-    die "Only values of type HashRef are supported for encrypted input fields\n"
-      unless ref $value eq 'HASH';
-
-    my $key = $self->_session->param('jwt_encryption_key');
+    my $key = $self->session_param('jwt_encryption_key');
     if (not $key) {
         $key = Crypt::PRNG::random_bytes(32);
-        $self->_session->param('jwt_encryption_key', $key);
+        $self->session_param('jwt_encryption_key', $key);
     }
 
     my $token = encode_jwt(
@@ -1073,13 +996,49 @@ sub _encrypt_jwt {
         },
     );
 
-    return $token
+    return $token;
+}
+
+=head2 secure_call
+
+Encrypt the given page and parameters using a JWT.
+
+Returns a string consisting of the pseudo page named C<encrypted> and the JWT
+as single parameter.
+
+B<Named parameters>
+
+=over
+
+=item * I<Str> C<page> - page to call.
+
+=item * I<HashRef> C<secure_param> - additional secure parameters that will be available via L</secure_param>.
+
+=back
+
+=cut
+
+signature_for secure_call => (
+    method => 1,
+    named => [
+        page => 'Str',
+        secure_param  => 'HashRef | Undef', { default => {} },
+    ],
+);
+sub secure_call ($self, $arg) {
+
+    my $token = $self->_encrypt_jwt({
+        page => $arg->page,
+        secure_param => $arg->secure_param // {},
+    });
+
+    return "encrypted!${token}";
 }
 
 =head2 make_autocomplete_query
 
-Create the autocomplete config for a UI text field from the given workflow
-field configuration C<$wf_field>.
+Create the autocomplete config for a UI text field from the given autocomplete
+workflow field configuration C<$ac_config>.
 
 Also returns an additional hidden, to-be-encrypted UI field definition.
 
@@ -1092,13 +1051,13 @@ Text input fields with autocompletion are configured as follows:
             user:
                 param_1: field_name_1
                 param_2: field_name_1
-            persist:
+            secure:
                 query:
                     status: { "-like": "%done" }
 
 Parameters below C<user> are filled from the referenced form fields.
 
-Parameters below C<persist> may contain data structures (I<HashRefs>, I<ArrayRefs>)
+Parameters below C<secure> may contain data structures (I<HashRefs>, I<ArrayRefs>)
 as they are backend-encrypted and sent to the client as a JWT token. They can
 be considered safe from user manipulation.
 
@@ -1106,7 +1065,7 @@ B<Parameters>
 
 =over
 
-=item * I<HashRef> C<$wf_field> - workflow field config
+=item * I<HashRef> C<$ac_config> - autocomplete workflow field config
 
 =back
 
@@ -1115,49 +1074,51 @@ B<Parameters>
 sub make_autocomplete_query {
 
     my $self = shift;
-    my $wf_field = shift;
+    my $ac_config = shift;
 
-    return unless $wf_field->{autocomplete};
-
-    # $wf_field = {
-    #     type: "text",
-    #     autocomplete: {
-    #         action: "text!autocomplete",
-    #         params: {
-    #             user: {
-    #                 reference_1: "comment",
-    #             },
-    #             persist: {
-    #                 static_a: "deep",
-    #                 sql_query: { "-like": "$key_id:%" },
-    #             },
+    # $ac_config = {
+    #     action => "text!autocomplete",
+    #     params => {
+    #         user => {
+    #             reference_1 => "comment",
+    #         },
+    #         secure => {
+    #             static_a => "deep",
+    #             sql_query => { "-like" => "$key_id:%" },
     #         },
     #     },
     # }
 
-    my $p = $wf_field->{autocomplete}->{params} // {};
+    my $p = $ac_config->{params} // {};
     my $p_user = $p->{user} // {};
-    my $p_persist = $p->{persist} // {};
+    my $p_secure = $p->{secure} // {};
+    my $needs_encryption = scalar keys $p_secure->%*;
+    die 'Autocomplete option "persist" was renamed to "secure"' if $p->{persist};
 
     my $enc_field_name = Data::UUID->new->create_str; # name for additional input field
 
-    my $ac_query_params = {  # the wf config param from the UI param
-        %$p_user,
-        __encrypted => $enc_field_name,
-    };
-
     # additional input field with encrypted data (protected from frontend modification)
-    my $enc_field = {
-        name => $enc_field_name,
-        type => 'encrypted',
-        value => {
-            persistent_params => $p_persist,
-            user_param_whitelist => [ sort keys %$p_user ], # allowed in subsequent request from frontend
+    my $enc_field = $needs_encryption
+        ? {
+            type => 'encrypted',
+            name => $enc_field_name,
+            value => {
+                data => $p_secure,
+                param_whitelist => [ sort keys %$p_user ], # allowed in subsequent request from frontend
+            },
+        }
+        : ();
+
+    return (
+        {
+            action => $ac_config->{action},
+            params => { # list of field names whose values the UI will append to the query
+                %$p_user,
+                $needs_encryption ? (__encrypted => $enc_field_name) : (),
+            },
         },
-    };
-
-    return ($ac_query_params, $enc_field)
-
+        $enc_field
+    );
 }
 
 =head2 fetch_autocomplete_params
@@ -1178,19 +1139,17 @@ B<Returns> a I<HashRef> of query parameters
 =cut
 
 sub fetch_autocomplete_params {
-
     my $self = shift;
 
-    my $data = $self->decrypted_param('__encrypted')
-        or return {};
+    my $data = $self->secure_param('__encrypted') or return {};
 
-    my %params = %{ $data->{persistent_params} };
-    $params{$_} = $self->param($_) for @{ $data->{user_param_whitelist} };
+    # add secure parameters
+    my %params = %{ $data->{data} };
+    # add whitelisted user input parameters
+    $params{$_} = $self->param($_) for @{ $data->{param_whitelist} };
 
-    $self->logger->trace("Autocomplete params: " . Dumper \%params) if $self->logger->is_trace;
-
+    $self->log->trace("Autocomplete params: " . Dumper \%params) if $self->log->is_trace;
     return \%params;
-
 }
 
 __PACKAGE__->meta->make_immutable;

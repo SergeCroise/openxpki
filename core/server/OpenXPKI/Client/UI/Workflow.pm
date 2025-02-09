@@ -1,20 +1,21 @@
 package OpenXPKI::Client::UI::Workflow;
-use Moose;
+use OpenXPKI -class;
 
 extends 'OpenXPKI::Client::UI::Result';
 
+with 'OpenXPKI::Client::UI::Role::OutputField';
+
 # Core modules
 use DateTime;
-use POSIX;
-use Data::Dumper;
+use POSIX ();
 use Cache::LRU;
+use Module::Load ();
 
 # CPAN modules
 use Date::Parse qw( str2time );
 use MIME::Base64;
 
 # Project modules
-use OpenXPKI::Debug;
 use OpenXPKI::Dumper;
 
 
@@ -60,7 +61,7 @@ has __default_wfdetails => (
             field => 'id',
             link => {
                 page => 'workflow!load!wf_id![% id %]',
-                target => '_blank',
+                target => 'top',
             },
         },
         {
@@ -204,7 +205,7 @@ sub __render_from_workflow {
     my $self = shift;
     my $args = shift;
 
-    $self->logger()->trace( "render args: " . Dumper $args) if $self->logger->is_trace;
+    $self->log->trace( "render args: " . Dumper $args) if $self->log->is_trace;
 
     my $wf_info = $args->{wf_info} || undef;
     my $view = $args->{view} || '';
@@ -217,11 +218,13 @@ sub __render_from_workflow {
         $args->{wf_info} = $wf_info;
     }
 
-    $self->logger()->trace( "wf_info: " . Dumper $wf_info) if $self->logger->is_trace;
+    $self->log->trace( "wf_info: " . Dumper $wf_info) if $self->log->is_trace;
     if (!$wf_info) {
         $self->status->error('I18N_OPENXPKI_UI_WORKFLOW_UNABLE_TO_LOAD_WORKFLOW_INFORMATION');
         return $self;
     }
+
+    my $wf_id = $wf_info->{workflow}->{id};
 
     # delegate handling to custom class
     if ($wf_info->{state}->{uihandle}) {
@@ -239,82 +242,6 @@ sub __render_from_workflow {
 
     my $wf_proc_state = $wf_info->{workflow}->{proc_state} || 'init';
 
-    # add buttons for manipulative handles (wakeup, fail, reset, resume)
-    # to be added to the default button list
-
-    my @handles;
-    my @buttons_handle;
-    if ($wf_info->{handles} && ref $wf_info->{handles} eq 'ARRAY') {
-        @handles = @{$wf_info->{handles}};
-
-        $self->logger()->debug('Adding global actions ' . join('/', @handles));
-
-        if (grep /\A wakeup \Z/x, @handles) {
-            my $token = $self->__register_wf_token( $wf_info, { wf_handle => 'wakeup' } );
-            push @buttons_handle, {
-                label => 'I18N_OPENXPKI_UI_WORKFLOW_FORCE_WAKEUP_BUTTON',
-                action => 'workflow!handle!wf_token!'.$token->{value},
-                format => 'exceptional'
-            }
-        }
-
-        if (grep /\A resume \Z/x, @handles) {
-            my $token = $self->__register_wf_token( $wf_info, { wf_handle => 'resume' } );
-            push @buttons_handle, {
-                label => 'I18N_OPENXPKI_UI_WORKFLOW_FORCE_RESUME_BUTTON',
-                action => 'workflow!handle!wf_token!'.$token->{value},
-                format => 'exceptional'
-            };
-        }
-
-        if (grep /\A reset \Z/x, @handles) {
-            my $token = $self->__register_wf_token( $wf_info, { wf_handle => 'reset' } );
-            push @buttons_handle, {
-                label => 'I18N_OPENXPKI_UI_WORKFLOW_FORCE_RESET_BUTTON',
-                action => 'workflow!handle!wf_token!'.$token->{value},
-                format => 'reset',
-                confirm => {
-                    label => 'I18N_OPENXPKI_UI_WORKFLOW_FORCE_RESET_DIALOG_LABEL',
-                    description => 'I18N_OPENXPKI_UI_WORKFLOW_FORCE_RESET_DIALOG_TEXT',
-                    confirm_label => 'I18N_OPENXPKI_UI_WORKFLOW_FORCE_RESET_DIALOG_CONFIRM_BUTTON',
-                    cancel_label => 'I18N_OPENXPKI_UI_WORKFLOW_FORCE_RESET_DIALOG_CANCEL_BUTTON',
-                }
-            };
-        }
-
-        if (grep /\A fail \Z/x, @handles) {
-            my $token = $self->__register_wf_token( $wf_info, { wf_handle => 'fail' } );
-            push @buttons_handle, {
-                label => 'I18N_OPENXPKI_UI_WORKFLOW_FORCE_FAILURE_BUTTON',
-                action => 'workflow!handle!wf_token!'.$token->{value},
-                format => 'failure',
-                confirm => {
-                    label => 'I18N_OPENXPKI_UI_WORKFLOW_FORCE_FAILURE_DIALOG_LABEL',
-                    description => 'I18N_OPENXPKI_UI_WORKFLOW_FORCE_FAILURE_DIALOG_TEXT',
-                    confirm_label => 'I18N_OPENXPKI_UI_WORKFLOW_FORCE_FAILURE_DIALOG_CONFIRM_BUTTON',
-                    cancel_label => 'I18N_OPENXPKI_UI_WORKFLOW_FORCE_FAILURE_DIALOG_CANCEL_BUTTON',
-                }
-            };
-        }
-
-        if (grep /\A archive \Z/x, @handles) {
-            my $token = $self->__register_wf_token( $wf_info, { wf_handle => 'archive' } );
-            push @buttons_handle, {
-                label => 'I18N_OPENXPKI_UI_WORKFLOW_FORCE_ARCHIVING_BUTTON',
-                action => 'workflow!handle!wf_token!'.$token->{value},
-                format => 'exceptional',
-                confirm => {
-                    label => 'I18N_OPENXPKI_UI_WORKFLOW_FORCE_ARCHIVING_DIALOG_LABEL',
-                    description => 'I18N_OPENXPKI_UI_WORKFLOW_FORCE_ARCHIVING_DIALOG_TEXT',
-                    confirm_label => 'I18N_OPENXPKI_UI_WORKFLOW_FORCE_ARCHIVING_DIALOG_CONFIRM_BUTTON',
-                    cancel_label => 'I18N_OPENXPKI_UI_WORKFLOW_FORCE_ARCHIVING_DIALOG_CANCEL_BUTTON',
-                }
-            };
-        }
-    }
-
-
-
     # show buttons to proceed with workflow if it's in "non-regular" state
     my %irregular = (
         running => 'I18N_OPENXPKI_UI_WORKFLOW_STATE_RUNNING_DESC',
@@ -324,20 +251,30 @@ sub __render_from_workflow {
     );
     if ($irregular{$wf_proc_state}) {
 
+        # add buttons for manipulative handles (wakeup, fail, reset, resume)
+        # to be added to the default button list
+        my @handles;
+        my @buttons_handle;
+        if ($wf_info->{handles} && ref $wf_info->{handles} eq 'ARRAY') {
+            # this is evaluated to show the context in the exception case below
+            @handles = @{$wf_info->{handles}};
+            # this is added to the button list at the end of the page
+            @buttons_handle = @{$self->__get_global_action_handles($wf_info)};
+        }
+
         # same page head for all proc states
         my $wf_action = $wf_info->{workflow}->{context}->{wf_current_action};
         my $wf_action_info = $wf_info->{activity}->{ $wf_action };
 
-        my $label = $self->__get_proc_state_label($wf_proc_state); # reuse labels from init_info popup
-        my $desc = $irregular{$wf_proc_state};
-
         $self->set_page(
-            label => $label,
+            label => $self->__get_proc_state_label($wf_proc_state), # reuse labels from init_info popup
             breadcrumb => $self->__get_breadcrumb($wf_info, $wf_info->{state}->{label}),
-            shortlabel => $wf_info->{workflow}->{id},
-            description => $desc,
+            description => $irregular{$wf_proc_state},
             css_class => 'workflow workflow-proc-state workflow-proc-'.$wf_proc_state,
-            ($wf_info->{workflow}->{id} ? (canonical_uri => 'workflow!load!wf_id!'.$wf_info->{workflow}->{id}) : ()),
+            OpenXPKI::Util->is_regular_workflow($wf_id) ? (
+                canonical_uri => "workflow!load!wf_id!${wf_id}",
+                workflow_id => $wf_id,
+            ) : (),
         );
 
         my @buttons;
@@ -367,17 +304,17 @@ sub __render_from_workflow {
                 # automated reload of the page
                 my $to_sleep = $wf_info->{workflow}->{wake_up_at} - time();
                 if ($to_sleep < 30) {
-                    $self->set_refresh(uri => 'workflow!load!wf_id!'.$wf_info->{workflow}->{id}, timeout => 30);
+                    $self->set_refresh(uri => "workflow!load!wf_id!${wf_id}", timeout => 30);
                     $self->status->info('I18N_OPENXPKI_UI_WORKFLOW_STATE_WATCHDOG_PAUSED_30SEC');
                 } elsif ($to_sleep < 300) {
-                    $self->set_refresh(uri => 'workflow!load!wf_id!'.$wf_info->{workflow}->{id}, timeout => $to_sleep + 30);
+                    $self->set_refresh(uri => "workflow!load!wf_id!${wf_id}", timeout => $to_sleep + 30);
                     $self->status->info('I18N_OPENXPKI_UI_WORKFLOW_STATE_WATCHDOG_PAUSED_5MIN');
                 } else {
                     $self->status->info('I18N_OPENXPKI_UI_WORKFLOW_STATE_WATCHDOG_PAUSED');
                 }
 
                 @buttons = ({
-                    page => 'redirect!workflow!load!wf_id!'.$wf_info->{workflow}->{id},
+                    page => "redirect!workflow!load!wf_id!${wf_id}",
                     label => 'I18N_OPENXPKI_UI_WORKFLOW_STATE_WATCHDOG_PAUSED_RECHECK_BUTTON',
                     format => 'alternative'
                 });
@@ -413,7 +350,7 @@ sub __render_from_workflow {
             });
 
             @buttons = ({
-                page => 'redirect!workflow!load!wf_id!'.$wf_info->{workflow}->{id},
+                page => "redirect!workflow!load!wf_id!${wf_id}",
                 label => 'I18N_OPENXPKI_UI_WORKFLOW_BULK_RECHECK_BUTTON',
                 format => 'alternative'
             });
@@ -429,10 +366,10 @@ sub __render_from_workflow {
                     # 4 hours = 15 min delay, 4 min = 1 min delay
                     $timeout = POSIX::floor(sqrt( $elapsed )) * 60;
                 }
-                $self->logger()->debug('Auto Refresh when running' . $elapsed .' / ' . $timeout );
+                $self->log->debug('Auto Refresh when running' . $elapsed .' / ' . $timeout );
             }
 
-            $self->set_refresh(uri => 'workflow!load!wf_id!'.$wf_info->{workflow}->{id}, timeout => $timeout);
+            $self->set_refresh(uri => "workflow!load!wf_id!${wf_id}", timeout => $timeout);
 
         # workflow halted by exception
         } elsif ( $wf_proc_state eq 'exception') {
@@ -488,10 +425,12 @@ sub __render_from_workflow {
         $self->set_page(
             label => $wf_info->{state}->{label} || $wf_info->{workflow}->{title} || $wf_info->{workflow}->{label},
             breadcrumb => $self->__get_breadcrumb($wf_info),
-            shortlabel => $wf_info->{workflow}->{id},
             description => $self->__get_templated_description($wf_info, $wf_info->{state}),
             css_class => 'workflow workflow-page ' . ($wf_info->{state}->{uiclass} || ''),
-            ($wf_info->{workflow}->{id} ? (canonical_uri => 'workflow!load!wf_id!'.$wf_info->{workflow}->{id}) : ()),
+            OpenXPKI::Util->is_regular_workflow($wf_id) ? (
+                canonical_uri => "workflow!load!wf_id!${wf_id}",
+                workflow_id => $wf_id,
+            ) : (),
         );
 
         # Set status decorator on final states (uses proc_state).
@@ -531,7 +470,7 @@ sub __render_from_workflow {
 
         my $fields = $self->__render_fields( $wf_info, $view );
 
-        $self->logger()->trace('Field data ' . Dumper $fields) if $self->logger->is_trace;
+        $self->log->trace('Field data ' . Dumper $fields) if $self->log->is_trace;
 
         # Add action buttons
         my $buttons = $self->__get_action_buttons( $wf_info ) ;
@@ -553,7 +492,7 @@ sub __render_from_workflow {
             # to continue the workflow and might want to reload the page
             if ($wf_proc_state eq 'manual' && @{$buttons} == 0) {
                 $buttons = [{
-                    page => 'redirect!workflow!load!wf_id!'.$wf_info->{workflow}->{id},
+                    page => "redirect!workflow!load!wf_id!${wf_id}",
                     label => 'I18N_OPENXPKI_UI_WORKFLOW_STATE_MANUAL_RECHECK_BUTTON',
                     format => 'alternative'
                 }];
@@ -591,16 +530,16 @@ sub __render_from_workflow {
                 }
 
                 if ($field->{format} eq 'grid') {
-                    $self->logger()->trace('Adding grid ' . Dumper $field) if $self->logger->is_trace;
+                    $self->log->trace('Adding grid ' . Dumper $field) if $self->log->is_trace;
                     $self->main->add_section({
                         type => 'grid',
                         className => 'workflow',
                         content => {
                             actions => ($field->{action} ? [{
-                                path => $field->{action},
+                                page => $field->{action},
                                 label => '',
                                 icon => 'view',
-                                target => ($field->{target} ? $field->{target} : 'tab'),
+                                target => ($field->{target} ? $field->{target} : 'top'),
                             }] : undef),
                             columns =>  $field->{header},
                             data => $field->{value},
@@ -610,7 +549,7 @@ sub __render_from_workflow {
                     });
                 } elsif ($field->{format} eq 'chart') {
 
-                    $self->logger()->trace('Adding chart ' . Dumper $field) if $self->logger->is_trace;
+                    $self->log->trace('Adding chart ' . Dumper $field) if $self->log->is_trace;
                     $self->main->add_section({
                         type => 'chart',
                         content => {
@@ -632,86 +571,19 @@ sub __render_from_workflow {
                     description => '',
                     data => \@section_fields,
                     buttons => $buttons,
-            }}) if (@section_fields);
+                }
+            }) if (@section_fields);
         }
     }
 
-    #
-    # Right block
-    #
-    if ($wf_info->{workflow}->{id}) {
-
-        my $wfdetails_config = $self->_client->session()->param('wfdetails');
-        # undef = no right box
-        if (defined $wfdetails_config) {
-
-            if ($view eq 'result' && $wf_info->{workflow}->{proc_state} !~ /(finished|failed|archived)/) {
-                push @buttons_handle, {
-                    href => '#/openxpki/redirect!workflow!load!wf_id!'.$wf_info->{workflow}->{id},
-                    label => 'I18N_OPENXPKI_UI_WORKFLOW_OPEN_WORKFLOW_LABEL',
-                    format => "primary",
-                };
-            }
-
-            # assemble infos
-            my $data = $self->__render_workflow_info( $wf_info, $wfdetails_config );
-
-            # The workflow info contains info about all control actions that
-            # can done on the workflow -> render appropriate buttons.
-            my $extra_handles;
-            if (@handles) {
-
-                my @extra_links;
-                if (grep /context/, @handles) {
-                    push @extra_links, {
-                        'page' => 'workflow!context!wf_id!'.$wf_info->{workflow}->{id},
-                        'label' => 'I18N_OPENXPKI_UI_WORKFLOW_CONTEXT_LABEL',
-                    };
-                }
-
-                if (grep /attribute/, @handles) {
-                    push @extra_links, {
-                        'page' => 'workflow!attribute!wf_id!'.$wf_info->{workflow}->{id},
-                        'label' => 'I18N_OPENXPKI_UI_WORKFLOW_ATTRIBUTE_LABEL',
-                    };
-                }
-
-                if (grep /history/, @handles) {
-                    push @extra_links, {
-                        'page' => 'workflow!history!wf_id!'.$wf_info->{workflow}->{id},
-                        'label' => 'I18N_OPENXPKI_UI_WORKFLOW_HISTORY_LABEL',
-                    };
-                }
-
-                if (grep /techlog/, @handles) {
-                    push @extra_links, {
-                        'page' => 'workflow!log!wf_id!'.$wf_info->{workflow}->{id},
-                        'label' => 'I18N_OPENXPKI_UI_WORKFLOW_LOG_LABEL',
-                    };
-                }
-
-                push @{$data}, {
-                    label => 'I18N_OPENXPKI_UI_WORKFLOW_EXTRA_INFO_LABEL',
-                    format => 'linklist',
-                    value => \@extra_links
-                } if (scalar @extra_links);
-
-            }
-
-            $self->infobox->add_section({
-                type => 'keyvalue',
-                content => {
-                    label => '',
-                    description => '',
-                    data => $data,
-                    buttons => \@buttons_handle,
-                },
-            });
-        }
-    }
+    $self->page->add_button(
+        label => 'Info',
+        format => 'info',
+        page => "workflow!info!wf_id!${wf_id}",
+        target => 'popup',
+    ) if OpenXPKI::Util->is_regular_workflow($wf_id);
 
     return $self;
-
 }
 
 =head2 __get_action_buttons
@@ -741,7 +613,7 @@ sub __get_action_buttons {
 
         my %button = (
             label => $wf_action_info->{label},
-            action => sprintf ('workflow!select!wf_action!%s!wf_id!%01d', $wf_action, $wf_info->{workflow}->{id}),
+            action => sprintf ('workflow!select!wf_action!%s!wf_id!%s', $wf_action, $wf_info->{workflow}->{id}),
         );
 
         # buttons in workflow start = only one initial start button
@@ -791,7 +663,7 @@ sub __get_action_buttons {
 
     }
 
-    $self->logger()->trace('Buttons are ' . Dumper \@buttons) if $self->logger->is_trace;
+    $self->log->trace('Buttons are ' . Dumper \@buttons) if $self->log->is_trace;
 
     return \@buttons;
 }
@@ -827,10 +699,10 @@ sub __get_form_buttons {
     }
 
     if ($wf_info->{handles} && ref $wf_info->{handles} eq 'ARRAY' && (grep /fail/, @{$wf_info->{handles}})) {
-        my $token = $self->__register_wf_token( $wf_info, { wf_handle => 'fail' } );
+        my $token = $self->__wf_token_extra_param( $wf_info, { wf_handle => 'fail' } );
         push @buttons, {
             label => 'I18N_OPENXPKI_UI_WORKFLOW_FORCE_FAILURE_BUTTON',
-            action => 'workflow!handle!wf_token!'.$token->{value},
+            action => "workflow!handle!${token}",
             format => 'terminate',
             confirm => {
                 label => 'I18N_OPENXPKI_UI_WORKFLOW_FORCE_FAILURE_DIALOG_LABEL',
@@ -844,6 +716,83 @@ sub __get_form_buttons {
     return \@buttons;
 }
 
+
+sub __get_global_action_handles {
+
+    my $self = shift;
+    my $wf_info = shift;
+
+    return [] unless ($wf_info->{handles});
+
+    my @handles = @{$wf_info->{handles}};
+    my @buttons;
+
+    $self->log->debug('Adding global actions ' . join('/', @handles));
+
+    if (grep /\A wakeup \Z/x, @handles) {
+        my $token = $self->__wf_token_extra_param( $wf_info, { wf_handle => 'wakeup' } );
+        push @buttons, {
+            label => 'I18N_OPENXPKI_UI_WORKFLOW_FORCE_WAKEUP_BUTTON',
+            action => "workflow!handle!${token}",
+            format => 'exceptional'
+        }
+    }
+
+    if (grep /\A resume \Z/x, @handles) {
+        my $token = $self->__wf_token_extra_param( $wf_info, { wf_handle => 'resume' } );
+        push @buttons, {
+            label => 'I18N_OPENXPKI_UI_WORKFLOW_FORCE_RESUME_BUTTON',
+            action => "workflow!handle!${token}",
+            format => 'exceptional'
+        };
+    }
+
+    if (grep /\A reset \Z/x, @handles) {
+        my $token = $self->__wf_token_extra_param( $wf_info, { wf_handle => 'reset' } );
+        push @buttons, {
+            label => 'I18N_OPENXPKI_UI_WORKFLOW_FORCE_RESET_BUTTON',
+            action => "workflow!handle!${token}",
+            format => 'reset',
+            confirm => {
+                label => 'I18N_OPENXPKI_UI_WORKFLOW_FORCE_RESET_DIALOG_LABEL',
+                description => 'I18N_OPENXPKI_UI_WORKFLOW_FORCE_RESET_DIALOG_TEXT',
+                confirm_label => 'I18N_OPENXPKI_UI_WORKFLOW_FORCE_RESET_DIALOG_CONFIRM_BUTTON',
+                cancel_label => 'I18N_OPENXPKI_UI_WORKFLOW_FORCE_RESET_DIALOG_CANCEL_BUTTON',
+            }
+        };
+    }
+
+    if (grep /\A fail \Z/x, @handles) {
+        my $token = $self->__wf_token_extra_param( $wf_info, { wf_handle => 'fail' } );
+        push @buttons, {
+            label => 'I18N_OPENXPKI_UI_WORKFLOW_FORCE_FAILURE_BUTTON',
+            action => "workflow!handle!${token}",
+            format => 'failure',
+            confirm => {
+                label => 'I18N_OPENXPKI_UI_WORKFLOW_FORCE_FAILURE_DIALOG_LABEL',
+                description => 'I18N_OPENXPKI_UI_WORKFLOW_FORCE_FAILURE_DIALOG_TEXT',
+                confirm_label => 'I18N_OPENXPKI_UI_WORKFLOW_FORCE_FAILURE_DIALOG_CONFIRM_BUTTON',
+                cancel_label => 'I18N_OPENXPKI_UI_WORKFLOW_FORCE_FAILURE_DIALOG_CANCEL_BUTTON',
+            }
+        };
+    }
+
+    if (grep /\A archive \Z/x, @handles) {
+        my $token = $self->__wf_token_extra_param( $wf_info, { wf_handle => 'archive' } );
+        push @buttons, {
+            label => 'I18N_OPENXPKI_UI_WORKFLOW_FORCE_ARCHIVING_BUTTON',
+            action => "workflow!handle!${token}",
+            format => 'exceptional',
+            confirm => {
+                label => 'I18N_OPENXPKI_UI_WORKFLOW_FORCE_ARCHIVING_DIALOG_LABEL',
+                description => 'I18N_OPENXPKI_UI_WORKFLOW_FORCE_ARCHIVING_DIALOG_TEXT',
+                confirm_label => 'I18N_OPENXPKI_UI_WORKFLOW_FORCE_ARCHIVING_DIALOG_CONFIRM_BUTTON',
+                cancel_label => 'I18N_OPENXPKI_UI_WORKFLOW_FORCE_ARCHIVING_DIALOG_CANCEL_BUTTON',
+            }
+        };
+    }
+    return \@buttons;
+}
 
 sub __get_next_auto_action {
 
@@ -873,7 +822,7 @@ sub __get_next_auto_action {
     return unless ($wf_info->{activity}->{$wf_action}->{field} ||
         $wf_info->{activity}->{$wf_action}->{uihandle});
 
-    $self->logger()->debug('Implicit autoselect of action ' . $wf_action ) if($wf_action);
+    $self->log->debug('Implicit autoselect of action ' . $wf_action ) if($wf_action);
 
     return $wf_action;
 
@@ -904,25 +853,35 @@ sub __render_input_field {
       unless wantarray;
 
     my $name = $field->{name};
-    next if ($name =~ m{ \A workflow_id }x);
-    next if ($name =~ m{ \A wf_ }x);
+    my $type = $field->{type};
+    $self->log->trace("Rendering field '$name'" . ($value ? " with value '$value'" : "")) if $self->log->is_trace;
 
-    my $type = $field->{type} || 'text';
-
-    # fields to be filled only by server sided workflows
-    return if ($type eq "server");
+    return if ($name =~ m{ \A workflow_id }x);
+    return if ($name =~ m{ \A wf_ }x);
+    return if ($type eq "server"); # fields to be filled only by server sided workflows
 
     # common attributes for all field types
     my $item = {
         name => $name,
         label => $field->{label} || $name,
-        type => $type
+        type => $type,
     };
-    $item->{placeholder} = $field->{placeholder} if ($field->{placeholder});
-    $item->{tooltip} = $field->{tooltip} if ($field->{tooltip});
+    $item->{placeholder} = $field->{placeholder} if $field->{placeholder};
+    $item->{tooltip} = $field->{tooltip} if $field->{tooltip};
+
+    # PLEASE NOTE:
+    # "min" is currently not processed in the web UI, it only serves as a flag:
+    # - for legacy profile fields, "min: 0" means "not required"
+    # - for workflow fields, "min: 0" or "min: 1" means "clonable"
+    # (see OpenXPKI::Workflow::Field)
+    #$item->{min} = $field->{min} if defined $field->{min};
+
+    $item->{max} = $field->{max} if defined $field->{max};
     $item->{clonable} = 1 if $field->{clonable};
     $item->{is_optional} = 1 unless $field->{required};
     $item->{ecma_match} = $field->{ecma_match} if $field->{ecma_match};
+    $item->{keys} = $field->{keys} if $field->{keys};
+    $item->{autocomplete} = $field->{autocomplete} if $field->{autocomplete};
 
     # includes dynamically generated additional fields
     my @all_items = ($item);
@@ -940,10 +899,15 @@ sub __render_input_field {
         }
         else {
             $item->{type} = 'text';
-            $item->{autocomplete_query} = {
+            $item->{autocomplete} = {
                 action => "certificate!autocomplete",
                 params => {
-                    cert_identifier => $item->{name},
+                    user => {
+                        cert_identifier => $item->{name},
+                    },
+                    # secure => {
+                    #     anything_that_should_be_encrypted => {},
+                    # }
                 },
             };
         }
@@ -956,15 +920,11 @@ sub __render_input_field {
     }
 
     # option 'autocomplete'
-    if ($field->{autocomplete}) {
-        my ($ac_query_params, $enc_field) = $self->make_autocomplete_query($field);
-        # "autocomplete_query" to distinguish it from the wf config param
-        $item->{autocomplete_query} = {
-            action => $field->{autocomplete}->{action},
-            params => $ac_query_params,
-        };
-        # additional field definition
-        push @all_items, $enc_field;
+    if (my $ac = $item->{autocomplete}) {
+        delete $item->{autocomplete};
+        my ($ac_query, $enc_field) = $self->make_autocomplete_query($ac);
+        $item->{autocomplete_query} = $ac_query; # "autocomplete_query" to distinguish it from the config param
+        push @all_items, $enc_field if $enc_field; # additional field definitio
     }
 
     # set (default) value and handle clonable fields
@@ -1018,8 +978,8 @@ sub __delegate_call {
     my $wf_action = shift || '';
 
     my ($class, $method, $n, $param) = $call =~ /([\w\:\_]+)::([\w\_]+)(!([!\w]+))?/;
-    $self->logger()->debug("delegate render to $class, $method" );
-    eval "use $class; 1;";
+    $self->log->debug("delegate render to $class, $method" );
+    Module::Load::load($class);
     if ($param) {
         $class->$method( $self, $args, $wf_action, $param );
     } else {
@@ -1043,7 +1003,7 @@ sub __render_result_list {
     my $search_result = shift;
     my $colums = shift;
 
-    $self->logger()->trace("search result " . Dumper $search_result) if $self->logger->is_trace;
+    $self->log->trace("search result " . Dumper $search_result) if $self->log->is_trace;
 
     my @result;
 
@@ -1085,7 +1045,7 @@ sub __render_result_list {
                     id => $wf_item->{'workflow_id'},
                     with_attributes => 1,
                 });
-                $self->logger()->trace( "fetch wf info : " . Dumper $wf_info) if $self->logger->is_trace;
+                $self->log->trace( "fetch wf info : " . Dumper $wf_info) if $self->log->is_trace;
                 $context = $wf_info->{workflow}->{context};
                 $attrib = $wf_info->{workflow}->{attribute};
             }
@@ -1235,497 +1195,36 @@ sub __render_fields {
         @fields_to_render = @$output;
         # strip array indicator [] from field name
         for (@fields_to_render) { $_->{name} =~ s/\[\]$// if ($_->{name}) }
-        $self->logger()->trace('Render output rules: ' . Dumper  \@fields_to_render) if $self->logger->is_trace;
+        $self->log->trace('Render output rules: ' . Dumper  \@fields_to_render) if $self->log->is_trace;
 
     } else {
         foreach my $field (sort keys %{$context}) {
             next if ($field =~ m{ \A (wf_|_|workflow_id|sources) }x);
             push @fields_to_render, { name => $field };
         }
-        $self->logger()->trace('No output rules, render plain context: ' . Dumper  \@fields_to_render) if $self->logger->is_trace;
+        $self->log->trace('No output rules, render plain context: ' . Dumper  \@fields_to_render) if $self->log->is_trace;
     }
 
     my $queued; # receives header items that depend on non-empty sections
+
     ##! 64: "Context: " . Dumper($context)
-    FIELD: foreach my $field (@fields_to_render) {
-
-        my $key = $field->{name} || '';
-        ##! 64: "Context value for field $key: " . (defined $context->{$key} ? Dumper($context->{$key}) : '')
-        my $item = {
-            name => $key,
-            value => $field->{value} // (defined $context->{$key} ? $context->{$key} : ''),
-            format =>  $field->{format} || ''
-        };
-
-
-        if ($field->{uiclass}) {
-            $item->{className} = $field->{uiclass};
-        }
-
-        if ($item->{format} eq 'spacer') {
-            push @fields, { format => 'head', className => $item->{className}||'spacer' };
-            next FIELD;
-        }
-
-        # Suppress key material, exceptions are vollatile and download fields
-        if ($item->{value} =~ /-----BEGIN[^-]*PRIVATE KEY-----/ && $item->{format} ne 'download' && substr($key,0,1) ne '_') {
-            $item->{value} = 'I18N_OPENXPKI_UI_WORKFLOW_SENSITIVE_CONTENT_REMOVED_FROM_CONTEXT';
-        }
-
-        # Label, Description, Tooltip
-        foreach my $prop (qw(label description tooltip preamble)) {
-            if ($field->{$prop}) {
-                $item->{$prop} = $field->{$prop};
-            }
-        }
-
-        if (!$item->{label}) {
-            $item->{label} = $key;
-        }
-
-        my $field_type = $field->{type} || '';
-
-        # we have several formats that might have non-scalar values
-        if (OpenXPKI::Serialization::Simple::is_serialized( $item->{value} ) ) {
-            $item->{value} = $self->serializer()->deserialize( $item->{value} );
-        }
-
-        # auto-assign format based on some assumptions if no format is set
-        if (!$item->{format}) {
-
-            # create a link on cert_identifier fields
-            if ( $key =~ m{ cert_identifier \z }x ||
-                $field_type eq 'cert_identifier') {
-                $item->{format} = 'cert_identifier';
-            }
-
-            # Code format any PEM blocks
-            if ( $key =~ m{ \A (pkcs10|pkcs7) \z }x  ||
-                $item->{value} =~ m{ \A -----BEGIN([A-Z ]+)-----.*-----END([A-Z ]+)---- }xms) {
-                $item->{format} = 'code';
-            } elsif ($field_type eq 'textarea') {
-                $item->{format} = 'nl2br';
-            }
-
-            if (ref $item->{value}) {
-                if (ref $item->{value} eq 'HASH') {
-                    $item->{format} = 'deflist';
-                } elsif (ref $item->{value} eq 'ARRAY') {
-                    $item->{format} = 'ullist';
-                }
-            }
-            ##! 64: 'Auto applied format: ' . $item->{format}
-        }
-
-        # convert format cert_identifier into a link
-        if ($item->{format} eq "cert_identifier") {
-            $item->{format} = 'link';
-
-            # do not create if the field is empty
-            if ($item->{value}) {
-                my $label = $item->{value};
-
-                my $cert_identifier = $item->{value};
-                $item->{value}  = {
-                    label => $label,
-                    page => 'certificate!detail!identifier!'.$cert_identifier,
-                    target => 'popup',
-                    # label is usually formated to a human readable string
-                    # but we sometimes need the raw value in the UI for extras
-                    value => $cert_identifier,
-                };
-            }
-
-            $self->logger()->trace( 'item ' . Dumper $item) if $self->logger->is_trace;
-
-        # open another workflow - performs ACL check
-        } elsif ($item->{format} eq "workflow_id") {
-
-            my $workflow_id = $item->{value};
-            next FIELD unless($workflow_id);
-
-            my $can_access = $self->send_command_v2( 'check_workflow_acl',
-                    { id => $workflow_id  });
-
-            if ($can_access) {
-                $item->{format} = 'link';
-                $item->{value}  = {
-                    label => $workflow_id,
-                    page => 'workflow!load!wf_id!'.$workflow_id,
-                    target => '_blank',
-                    value => $workflow_id,
-                };
-            } else {
-                $item->{format} = '';
-            }
-
-            $self->logger()->trace( 'item ' . Dumper $item) if $self->logger->is_trace;
-
-        # add a redirect command to the page
-        } elsif ($item->{format} eq "redirect") {
-
-            if (ref $item->{value}) {
-                my $v = $item->{value};
-                my $target = $v->{target} || 'workflow!load!wf_id!'.$wf_info->{workflow}->{id};
-                my $pause = $v->{pause} || 1;
-                $self->set_refresh(uri => $target, timeout => $pause);
-                if ($v->{label}) {
-                    $self->status->message($v->{label});
-                    $self->status->level($v->{level}) if $v->{level};
-                }
-            } else {
-                $self->redirect->to($item->{value});
-            }
-            # we dont want this to show up in the result so we unset its value
-            $item = undef;
-
-        # create a link to download the given filename
-        } elsif ($item->{format} =~ m{ \A download(\/([\w_\/-]+))? }xms ) {
-
-            # legacy - format is "download/mime/type"
-            my $mime = $2 || 'application/octect-stream';
-            $item->{format} = 'download';
-
-            # value is empty
-            next FIELD unless($item->{value});
-
-            # parameters given in the field definition
-            my $param = $field->{param} || {};
-
-            # Arguments for the UI field
-            # label => STR           # text above the download field
-            # type => "plain" | "base64" | "link",  # optional, default: "plain"
-            # data => STR,           # plain data, Base64 data or URL
-            # mimetype => STR,       # optional: mimetype passed to browser
-            # filename => STR,       # optional: filename, default: depends on data
-            # autodownload => BOOL,  # optional: set to 1 to auto-start download
-            # hide => BOOL,          # optional: set to 1 to hide input and buttons (requires autodownload)
-
-            my $vv = $item->{value};
-            # scalar value
-            if (!ref $vv) {
-                # if an explicit filename is set, we assume it is v3.10 or
-                # later so we assume the value is the data and config is in
-                # the field parameters
-                if ($param->{filename}) {
-                    $vv = { filename => $param->{filename}, data => $vv };
-                } else {
-                    $vv = { filename => $vv, source => 'file:'.$vv };
-                }
-            }
-
-            # very old legacy format where file was given without source
-            if ($vv->{file}) {
-                $vv->{source} = "file:".$vv->{file};
-                $vv->{filename} = $vv->{file} unless($vv->{filename});
-                delete $vv->{file};
-            }
-
-            # merge items from field param
-            map { $vv->{$_} ||= $param->{$_}  } ('mime','label','binary','hide','auto','filename');
-
-            # guess filename from a file source
-            if (!$vv->{filename} && $vv->{source} && $vv->{source} =~ m{ file:.*?([^\/]+(\.\w+)?) \z }xms) {
-                $vv->{filename} = $1;
-            }
-
-            # set mime to default / from format
-            $vv->{mime} ||= $mime;
-
-            # we have an external source so we need a link
-            if ($vv->{source}) {
-                 my $target = $self->__persist_response({
-                    source => $vv->{source},
-                    attachment =>  $vv->{filename},
-                    mime => $vv->{mime}
-                });
-                $item->{value}  = {
-                    label => 'I18N_OPENXPKI_UI_CLICK_TO_DOWNLOAD',
-                    type => 'link',
-                    filename => $vv->{filename},
-                    data => $self->_client()->_config()->{'scripturl'} . "?page=".$target,
-                };
-            } else {
-                my $type;
-                # payload is binary, so encode it and set type to base64
-                if ($vv->{binary}) {
-                    $type = 'base64';
-                    $vv->{data} = encode_base64($vv->{data}, '');
-                } elsif ($vv->{base64}) {
-                    $type = 'base64';
-                }
-                $item->{value}  = {
-                    label=> $vv->{label},
-                    mimetype => $vv->{mime},
-                    filename => $vv->{filename},
-                    type => $type,
-                    data => $vv->{data},
-                };
-            }
-
-            if ($vv->{hide}) {
-                $item->{value}->{autodownload} = 1;
-                $item->{value}->{hide} = 1;
-            } elsif ($vv->{auto}) {
-                $item->{value}->{autodownload} = 1;
-            }
-
-        # format for cert_info block
-        } elsif ($item->{format} eq "cert_info") {
-            $item->{format} = 'deflist';
-
-            my $raw = $item->{value};
-
-            # this requires that we find the profile and subject in the context
-            my @val;
-            my $cert_profile = $context->{cert_profile};
-            my $cert_subject_style = $context->{cert_subject_style};
-            if ($cert_profile && $cert_subject_style) {
-
-                if (!$raw || ref $raw ne 'HASH') {
-                    $raw = {};
-                }
-
-                my $fields = $self->send_command_v2( 'get_field_definition',
-                    { profile => $cert_profile, style => $cert_subject_style, 'section' =>  'info' });
-                $self->logger()->trace( 'Profile fields' . Dumper $fields ) if $self->logger->is_trace;
-
-                foreach my $field (@$fields) {
-                    # FIXME this still uses "old" syntax - adjust after API refactoring
-                    my $key = $field->{id}; # Name of the context key
-                    if ($raw->{$key}) {
-                        push @val, { label => $field->{label}, value => $raw->{$key}, key => $key };
-                    }
-                }
-            } else {
-                # if nothing is found, transform raw values to a deflist
-                my $kv = $item->{value} || {};
-                @val = map { { key => $_, label => $_, value => $kv->{$_}} } sort keys %{$kv};
-
-            }
-
-            $item->{value} = \@val;
-
-        } elsif ($item->{format} eq "ullist" || $item->{format} eq "rawlist") {
-            # nothing to do here
-
-        } elsif ($item->{format} eq "itemcnt") {
-
-            my $list = $item->{value};
-
-            if (ref $list eq 'ARRAY') {
-                $item->{value} = scalar @{$list};
-            } elsif (ref $list eq 'HASH') {
-                $item->{value} = scalar keys %{$list};
-            } else {
-                $item->{value} = '??';
-            }
-            $item->{format} = '';
-
-        } elsif ($item->{format} eq "deflist") {
-
-            # Sort by label
-            my @val;
-            if ($item->{value} && (ref $item->{value} eq 'HASH')) {
-                @val = map { { label => $_, value => $item->{value}->{$_}} } sort keys %{$item->{value}};
-                $item->{value} = \@val;
-            }
-
-        } elsif ($item->{format} eq "grid") {
-
-            my @head;
-            # item value can be data or grid specification
-            if (ref $item->{value} eq 'HASH') {
-                my $hv = $item->{value};
-                $item->{header} = [ map { { 'sTitle' => $_ } } @{$hv->{header}} ];
-                $item->{value} = $hv->{value};
-            } elsif ($field->{header}) {
-                $item->{header} = [ @head = map { { 'sTitle' => $_ } } @{$field->{header}} ];
-            } else {
-                $item->{header} = [ @head = map { { 'sTitle' => '' } } @{$item->{value}->[0]} ];
-            }
-            $item->{action} = $field->{action};
-            $item->{target} = $field->{target} ?  $field->{target} : 'tab';
-
-        } elsif ($item->{format} eq "chart") {
-
-            my @head;
-
-            my $param = $field->{param} || {};
-
-            $item->{options} = {
-                type => 'line',
-            };
-
-            # read options from the fields param method
-            foreach my $key ('width','height','type','title') {
-                $item->{options}->{$key} = $param->{$key} if (defined $param->{$key});
-            }
-
-            # series can be a hash based on the datas keys or an array
-            my $series = $param->{series};
-            if (ref $series eq 'ARRAY') {
-                $item->{options}->{series} = $series;
-            }
-
-            my $start_at = 0;
-            my $interval = 'months';
-
-            # item value can be data (array) or chart specification (hash)
-            if (ref $item->{value} eq 'HASH') {
-                # single data row chart with keys as groups
-                my $hv = $item->{value};
-                my @series;
-                my @keys;
-                if (ref $series eq 'HASH') {
-                    # series contains label as key / value hash
-                    @keys = sort keys %{$series};
-                    map {
-                        # series value can be a scalar (label) or a full hash
-                        my $ll = $series->{$_};
-                        push @series, (ref $ll ? $ll : { label => $ll });
-                        $_;
-                    } @keys;
-
-                } elsif (ref $series eq 'ARRAY') {
-                    @keys = map {
-                        my $kk = $_->{key};
-                        delete $_->{key};
-                        $kk;
-                    } @{$series};
-
-                } else {
-
-                    @keys = grep { ref $hv->{$_} ne 'HASH' } sort keys %{$hv};
-                    if (my $prefix = $param->{label}) {
-                        # label is a prefix to be merged with the key names
-                        @series = map { { label => $prefix.'_'.uc($_) } } @keys;
-                    } else {
-                        @series = map {  { label => $_ } } @keys;
-                    }
-                }
-
-                # check if we have a single row or multiple, we also assume
-                # that all keys have the same value count so we just take the
-                # first one
-                if (ref $hv->{$keys[0]}) {
-                    # get the number of items per row
-                    my $ic = scalar @{$hv->{$keys[0]}};
-
-                    # if start_at is not set, we do a backward calculation
-                    $start_at ||= DateTime->now()->subtract ( $interval => ($ic-1) );
-                    my $val = [];
-                    for (my $drw = 0; $drw < $ic; $drw++) {
-                        my @row = (undef) x @keys;
-                        unshift @row, $start_at->epoch();
-                        $start_at->add( $interval => 1 );
-                        $val->[$drw] = \@row;
-                        for (my $idx = 0; $idx < @keys; $idx++) {
-                            $val->[$drw]->[$idx+1] = $hv->{$keys[$idx]}->[$drw];
-                        }
-                    }
-                    $item->{value} = $val;
-
-                } elsif ($item->{options}->{type} eq 'pie') {
-
-                    my $sum = 0;
-                    my @val = map { $sum+=$hv->{$_}; $hv->{$_} || 0 } @keys;
-                    if ($sum) {
-                        my $divider = 100 / $sum;
-
-                        @val = map {  $_ * $divider } @val;
-
-                        unshift @val, '';
-                        $item->{value} = [ \@val ];
-                    }
-
-                } else {
-                    # only one row so this is easy
-                    my @val = map { $hv->{$_} || 0 } @keys;
-                    unshift @val, '';
-                    $item->{value} = [ \@val ];
-                }
-                $item->{options}->{series} = \@series if (@series);
-
-            } elsif (ref $item->{value} eq 'ARRAY' && @{$item->{value}}) {
-                if (!ref $item->{value}->[0]) {
-                    $item->{value} = [ $item->{value} ];
-                }
-            }
-
-        } elsif ($field_type eq 'select' && !$field->{template} && $field->{option} && ref $field->{option} eq 'ARRAY') {
-            foreach my $option (@{$field->{option}}) {
-                next unless (defined $option->{value});
-                if ($item->{value} eq $option->{value}) {
-                    $item->{value} = $option->{label};
-                    last;
-                }
-            }
-        }
-
-        if ($field->{template}) {
-
-            $self->logger()->trace('Render output using template on field '.$key.', '. $field->{template} . ', value:  ' . Dumper $item->{value}) if $self->logger->is_trace;
-
-            # Rendering target depends on value format
-            # deflist: iterate over each label/value pair and render the value template
-            if ($item->{format} eq "deflist") {
-                $item->{value} = [
-                    map {
-                        my $val = $self->send_command_v2('render_template', { template => $field->{template}, params => $_ });
-                        {
-                            # $_ is a HashRef: { label => STR, key => STR, value => STR } where key is the field name (not needed here)
-                            label => $_->{label},
-                            value => [ split (/\|/, $val) ],
-                            format => 'raw',
-                        }
-                    }
-                    @{ $item->{value} }
-                ];
-
-            # bullet list, put the full list to tt and split at the | as sep (as used in profile)
-            } elsif ($item->{format} eq "ullist" || $item->{format} eq "rawlist") {
-                my $out = $self->send_command_v2('render_template', {
-                    template => $field->{template},
-                    params => { value => $item->{value} },
-                });
-                $self->logger()->debug('Rendered template: ' . $out);
-                if ($out) {
-                    my @val = split /\s*\|\s*/, $out;
-                    $self->logger()->trace('Split ' . Dumper \@val) if $self->logger->is_trace;
-                    $item->{value} = \@val;
-                } else {
-                    $item->{value} = undef; # prevent pushing emtpy lists
-                }
-
-            } elsif (ref $item->{value} eq 'HASH' && $item->{value}->{label}) {
-                $item->{value}->{label} = $self->send_command_v2('render_template', {
-                    template => $field->{template},
-                    params => { value => $item->{value}->{label} },
-                });
-
-            } else {
-                $item->{value} = $self->send_command_v2('render_template', {
-                    template => $field->{template},
-                    params => { value => $item->{value} },
-                });
-            }
-
-        } elsif ($field->{yaml_template}) {
-            ##! 64: 'Rendering value: ' . $item->{value}
-            $self->logger->debug('Template value: ' . SDumper $item );
-            my $structure = $self->send_command_v2('render_yaml_template', {
-                template => $field->{yaml_template},
-                params => { value => $item->{value} },
-            });
-            $self->logger->debug('Rendered YAML template: ' . SDumper $structure);
-            ##! 64: 'Rendered YAML template: ' . $out
-            if (defined $structure) {
-                $item->{value} = $structure;
-            } else {
-                $item->{value} = undef; # prevent pushing emtpy lists
-            }
-        }
+    foreach my $field (@fields_to_render) {
+        my $name = $field->{name} || '';
+        $field->{value} //= ($wf_info->{workflow}->{context}->{$name} // '');
+
+        my $item = $self->render_output_field( # from OpenXPKI::Client::UI::Role::OutputField
+            field => $field,
+            # additional custom field render methods
+            handlers => {
+                "redirect" => \&__render_field_redirect,
+                "request_info" => \&__render_field_request_info,
+                "cert_info" => \&__render_field_cert_info,
+            },
+            # additional argument to pass to render methods
+            handler_params => $wf_info,
+        );
+
+        next unless $item;
 
         # do not push items that are empty
         if (!(defined $item->{value} &&
@@ -1749,6 +1248,115 @@ sub __render_fields {
 
     return \@fields;
 
+}
+
+# add a redirect command to the page
+sub __render_field_redirect {
+    my ($self, $field, $item, $wf_info) = @_;
+
+    if (ref $item->{value}) {
+        my $v = $item->{value};
+        my $target = $v->{target} || 'workflow!load!wf_id!'.$wf_info->{workflow}->{id};
+        my $pause = $v->{pause} || 1;
+        $self->set_refresh(uri => $target, timeout => $pause);
+        if ($v->{label}) {
+            $self->status->message($v->{label});
+            $self->status->level($v->{level}) if $v->{level};
+        }
+    } elsif ($item->{value}) {
+        $self->redirect->to($item->{value});
+    }
+    return -1; # do not output this field
+}
+
+# certificate request info
+sub __render_field_request_info {
+    my ($self, $field, $item, $wf_info) = @_;
+
+    $item->{format} = 'unilist';
+
+    my $default_formats = {
+        email => 'email',
+        requestor_email => 'email',
+        owner_contact => 'email',
+    };
+
+    my $cert_values = ($item->{value} and ref $item->{value} eq 'HASH') ? $item->{value} : {};
+
+    my @val;
+    my $profile = $wf_info->{workflow}->{context}->{cert_profile};
+    my $style = $wf_info->{workflow}->{context}->{cert_subject_style};
+
+    # use customized field list from profile if we find profile and subject in the context
+    if ($profile and $style) {
+        my $cert_fields = $self->send_command_v2(get_field_definition => {
+            profile => $profile,
+            style => $style,
+            section => 'info',
+        });
+
+        foreach my $cert_field (@$cert_fields) {
+            my $cert_fieldname = $cert_field->{name};
+            my $value = $cert_values->{$cert_fieldname} or next;
+
+            push @val, {
+                format => $cert_field->{format} // $default_formats->{$cert_fieldname} // 'text',
+                label => $cert_field->{label},
+                value => $value,
+            };
+        }
+    # otherwise transform raw values to a text list
+    } else {
+        foreach my $key (sort keys %{$cert_values}) {
+            push @val, {
+                format => $default_formats->{$key} // 'text',
+                label => $key,
+                value => $cert_values->{$key},
+            };
+        }
+    }
+
+    $item->{value} = \@val;
+    return 1;
+}
+
+# legacy format for certificate request info
+sub __render_field_cert_info {
+    my ($self, $field, $item, $wf_info) = @_;
+
+    $item->{format} = 'deflist';
+
+    my $raw = $item->{value};
+    $raw = {} unless ($raw and ref $raw eq 'HASH');
+
+    # this requires that we find the profile and subject in the context
+    my @val;
+    my $profile = $wf_info->{workflow}->{context}->{cert_profile};
+    my $style = $wf_info->{workflow}->{context}->{cert_subject_style};
+
+    if ($profile && $style) {
+        my $fields = $self->send_command_v2(get_field_definition => {
+            profile => $profile,
+            style => $style,
+            section => 'info',
+        });
+        $self->log->trace('Profile fields = ' . Dumper $fields) if $self->log->is_trace;
+
+        foreach my $field (@$fields) {
+            my $key = $field->{name}; # Name of the context key
+            if ($raw->{$key}) {
+                push @val, { label => $field->{label}, value => $raw->{$key}, key => $key };
+            }
+        }
+    } else {
+        # if nothing is found, transform raw values to a deflist
+        my $kv = $item->{value} || {};
+        @val = map { { key => $_, label => $_, value => $kv->{$_}} } sort keys %{$kv};
+
+    }
+
+    $item->{value} = \@val;
+    return 1;
 }
 
 =head2 __render_workflow_info
@@ -1888,7 +1496,7 @@ sub __render_creator_tooltip {
             ->add($field->{yaml_template} // $field->{template} // '')
             ->add($creator//'')->hexdigest;
 
-        $self->logger()->trace('creator tooltip cache id ' .  $cacheid);
+        $self->log->trace('creator tooltip cache id ' .  $cacheid);
         my $value = $template_cache->get($cacheid);
         return $value if($value);
 
@@ -1896,7 +1504,7 @@ sub __render_creator_tooltip {
 
     # the field comes with a YAML template = render the field definiton from it
     if ($field->{yaml_template}) {
-        $self->logger()->debug('render creator tooltip from yaml template');
+        $self->log->debug('render creator tooltip from yaml template');
         my $val = $self->send_command_v2( render_yaml_template => {
             template => $field->{yaml_template},
             params => { creator => $creator },
@@ -1905,7 +1513,7 @@ sub __render_creator_tooltip {
 
     # use template (or default template) to set username
     } else {
-        $self->logger()->debug('render creator name from template');
+        $self->log->debug('render creator name from template');
         my $username = $self->send_command_v2( render_template => {
             template => $field->{template} || '[% USE Metadata; Metadata.creator(creator) %]',
             params => { creator => $creator },
@@ -1923,7 +1531,7 @@ sub __render_creator_tooltip {
     # still no result
     $value->{tooltip} //= 'I18N_OPENXPKI_UI_WORKFLOW_CREATOR_UNABLE_TO_RESOLVE';
 
-    $self->logger()->trace(Dumper { cacheid => $cacheid, value => $value} );
+    $self->log->trace(Dumper { cacheid => $cacheid, value => $value} ) if $self->log->is_trace;
 
     $template_cache->set($cacheid => $value) if($cacheid);
     return $value;
@@ -1940,40 +1548,40 @@ sub __get_proc_state_desc {
     return $proc_state ? $self->__proc_state_i18n->{$proc_state}->{desc} : '-';
 }
 
-# methods extracted from __render_workflow_info
-# this should be moved to a seperate file/class
+# FIXME this should be moved to a seperate file/class
 sub __get_breadcrumb {
 
     my $self = shift;
     my $wf_info = shift;
     my $state_label = shift;
-    # we set the breadcrumb only if the workflow has a title set
-    # fallback to label if title is not DEFINED is done in the API
-    # setting title to the empty string will suppress breadcrumbs
-    my @breadcrumb;
-    if ($wf_info->{workflow}->{title}) {
-        if ($wf_info->{workflow}->{id}) {
-            push @breadcrumb, {
-                className => 'workflow-type' ,
-                label => sprintf("%s (#%01d)", $wf_info->{workflow}->{title}, $wf_info->{workflow}->{id})
-            };
-        } elsif ($wf_info->{workflow}->{state} eq 'INITIAL') {
-            push @breadcrumb, {
-                className => 'workflow-type',
-                label => sprintf("%s", $wf_info->{workflow}->{title})
-            };
-        }
+
+    # We set the breadcrumb only if the workflow has a title set.
+    # Setting title to the empty string will suppress breadcrumbs.
+    # Fallback to label if title is not DEFINED is done in the API.
+    return { suppress => 1 } unless $wf_info->{workflow}->{title};
+
+    if ($state_label) {
+        return {
+            class => 'workflow-state',
+            label => $state_label,
+        };
     }
-
-    if (@breadcrumb && $state_label) {
-        push @breadcrumb, { className => 'workflow-state', label => $state_label };
+    if ($wf_info->{workflow}->{id}) {
+        return {
+            class => 'workflow-type' ,
+            label => sprintf("%s #%s", $wf_info->{workflow}->{title}, $wf_info->{workflow}->{id})
+        };
     }
-
-    return \@breadcrumb;
-
+    if ($wf_info->{workflow}->{state} eq 'INITIAL') {
+        return {
+            class => 'workflow-type',
+            label => sprintf("%s", $wf_info->{workflow}->{title})
+        };
+    }
+    return {};
 }
 
-  # helper sub to render the pages description text from state/action using a template
+# render page description text from state/action using a template
 sub __get_templated_description {
 
     my $self = shift;
@@ -1981,7 +1589,7 @@ sub __get_templated_description {
     my $page_def = shift;
     my $description;
     if ($page_def->{template}) {
-        my $user = $self->_client->session()->param('user');
+        my $user = $self->session_param('user');
         $description = $self->send_command_v2( 'render_template', {
             template => $page_def->{template}, params => {
                 context => $wf_info->{workflow}->{context},
@@ -2012,10 +1620,12 @@ sub __render_workflow_action_head {
     $self->set_page(
         label => $label,
         breadcrumb => $breadcrumb,
-        shortlabel => $wf_info->{workflow}->{id},
         description => $self->__get_templated_description($wf_info, $wf_action_info),
         css_class => 'workflow workflow-action ' . ($wf_action_info->{uiclass} || ''),
-        canonical_uri => sprintf('workflow!load!wf_id!%01d!wf_action!%s', $wf_info->{workflow}->{id}, $wf_action),
+        canonical_uri => sprintf('workflow!load!wf_id!%s!wf_action!%s', $wf_info->{workflow}->{id}, $wf_action),
+        OpenXPKI::Util->is_regular_workflow($wf_info->{workflow}->{id}) ? (
+            workflow_id => $wf_info->{workflow}->{id},
+        ) : (),
     );
 }
 
@@ -2028,7 +1638,7 @@ sub __render_workflow_action_body {
 
     my $wf_action_info = $wf_info->{activity}->{$wf_action};
 
-    $self->logger()->trace('activity info ' . Dumper $wf_action_info ) if $self->logger->is_trace;
+    $self->log->trace('activity info ' . Dumper $wf_action_info ) if $self->log->is_trace;
 
     # we allow prefill of the form if the workflow is started
     my $do_prefill = $wf_info->{workflow}->{state} eq 'INITIAL';
@@ -2043,13 +1653,13 @@ sub __render_workflow_action_body {
         my $name = $field->{name};
         next if ($name =~ m{ \A workflow_id }x);
         next if ($name =~ m{ \A wf_ }x);
-        next if ($field->{type} && $field->{type} eq "server");
+        next if ($field->{type} eq "server");
 
         my $val = $self->param($name);
         if ($do_prefill && defined $val) {
             # XSS prevention - very rude, but if you need to pass something
             # more sophisticated use the wf_token technique
-            $val =~ s/[^A-Za-z0-9_=,-\. ]//;
+            $val =~ s/[^A-Za-z0-9_=,-\. ]//g;
         } elsif (defined $context->{$name}) {
             $val = $context->{$name};
         } else {
@@ -2090,7 +1700,7 @@ sub __render_workflow_action_body {
             buttons => $self->__get_form_buttons( $wf_info ),
         );
         # record the workflow info in the session
-        push @fields, $self->__register_wf_token( $wf_info, {
+        push @fields, $self->__wf_token_field( $wf_info, {
             wf_action => $wf_action,
             wf_fields => \@fields,
         });
@@ -2106,94 +1716,5 @@ sub __render_workflow_action_body {
         }) if scalar @fielddesc;
     }
 }
-
-
-sub __save_query {
-    my $self = shift;
-    my $id = (ref $_[0] ne 'HASH') ? shift : $self->__generate_uid;
-    my $query = shift;
-
-    $self->_client->session->param("query_wfl_${id}" => {
-        %{ $query },
-        'id' => $id,
-    });
-
-    return $id;
-}
-
-sub __load_query {
-    my $self = shift;
-    my $id = shift;
-
-    # load query from session
-    my $result = $self->_client->session->param("query_wfl_${id}");
-
-    # check expired or broken id
-    if (not $result or not $result->{count}) {
-        $self->status->error('I18N_OPENXPKI_UI_SEARCH_RESULT_EXPIRED_OR_EMPTY');
-        return;
-    }
-
-    return $result;
-}
-
-=head1 Example workflow configuration
-
-=head2 State with default rendering
-
-    <state name="DATA_LOADED">
-        <description>I18N_OPENXPKI_WF_STATE_CHANGE_METADATA_LOADED</description>
-        <action name="changemeta_update" resulting_state="DATA_UPDATE"/>
-        <action name="changemeta_persist" resulting_state="SUCCESS"/>
-    </state>
-    ...
-    <action name="changemeta_update"
-        class="OpenXPKI::Server::Workflow::Activity::Noop"
-        description="I18N_OPENXPKI_ACTION_UPDATE_METADATA">
-        <field name="metadata_update" />
-    </action>
-    <action name="changemeta_persist"
-        class="OpenXPKI::Server::Workflow::Activity::PersistData">
-    </action>
-
-When reached first, a page with the text from the description tag and two
-buttons will appear. The update button has I18N_OPENXPKI_ACTION_UPDATE_METADATA
-as label an after pushing it, a form with one text field will be rendered.
-The persist button has no description and will have the action name
-changemeta_persist as label. As it has no input fields, the workflow will go
-to the next state without further ui interaction.
-
-=head2 State with custom rendering
-
-    <state name="DATA_LOADED" uihandle="OpenXPKI::Client::UI::Workflow::Metadata::render_current_data">
-    ....
-    </state>
-
-Regardless of what the rest of the state looks like, as soon as the state is
-reached, the render_current_data method is called.
-
-=head2 Action with custom rendering
-
-    <state name="DATA_LOADED">
-        <description>I18N_OPENXPKI_WF_STATE_CHANGE_METADATA_LOADED</description>
-        <action name="changemeta_update" resulting_state="DATA_UPDATE"/>
-        <action name="changemeta_persist" resulting_state="SUCCESS"/>
-    </state>
-
-    <action name="changemeta_update"
-        class="OpenXPKI::Server::Workflow::Activity::Noop"
-        uihandle="OpenXPKI::Client::UI::Workflow::Metadata::render_update_form"
-        description="I18N_OPENXPKI_ACTION_UPDATE_METADATA_ACTION">
-        <field name="metadata_update"/>
-    </action>
-
-While no action is selected, this will behave as the default rendering and show
-two buttons. After the changemeta_update button was clicked, it calls the
-render_update_form method. Note: The uihandle does not affect the target of
-the form submission so you either need to properly setup the environment to
-use the default action (see action_index) or set the wf_handler to a custom
-method for parsing the form data.
-
-=cut
 
 __PACKAGE__->meta->make_immutable;

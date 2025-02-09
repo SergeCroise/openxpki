@@ -1,0 +1,255 @@
+#!/usr/bin/env perl
+use OpenXPKI;
+
+use Getopt::Long;
+use Pod::Usage;
+use JSON::PP;
+use YAML;
+
+use OpenXPKI::i18n qw(set_language);
+use OpenXPKI::Client::API;
+use OpenXPKI::Client::API::Response;
+use OpenXPKI::Client::CLI;
+use OpenXPKI::DTO::Authenticator;
+
+set_language('en_US');
+use Log::Log4perl qw(:easy :no_extra_logdie_message);
+pod2usage( -verbose => 1 ) unless (@ARGV);
+
+my $verbose = 0;
+my %opt = ('verbose' => \$verbose);
+Getopt::Long::Configure('pass_through','bundling');
+GetOptions( \%opt, ('verbose|v+','json','json-pretty','auth-key|k=s','auth-config|c=s','no-caop','help'));
+Getopt::Long::Configure('no_pass_through');
+
+my $l4p_level;
+my $l4p_layout = '%m%n';
+if ($verbose > 2) {
+    $l4p_level = $TRACE;
+    $l4p_layout = '%l %F:%L %m%n';
+} elsif ($verbose == 2) {
+    $l4p_level = $DEBUG;
+    $l4p_layout = '%m%n';
+} elsif ($verbose == 1) {
+    $l4p_level = $INFO;
+} else {
+    $l4p_level = $ERROR;
+}
+Log::Log4perl->easy_init({ level => $l4p_level, layout => $l4p_layout });
+
+my $api = OpenXPKI::Client::API->new(enable_acls => 0);
+
+# help is also avail via flag for subcommands
+if ($opt{help} && @ARGV) {
+    say $api->help(@ARGV);
+    exit 0;
+}
+
+# Get list of commands
+my $command = shift;
+if ($command eq 'help') {
+
+    if (@ARGV) {
+        say $api->help(@ARGV);
+        exit 0;
+    }
+
+    say "oxi COMMAND [SUBCOMMAND] [OPTIONS] ARGUMENTS";
+    say "";
+    say $api->help;
+    exit 0;
+}
+
+my $subcommand = shift;
+# List subcommands for command
+if (not $subcommand) {
+    say "oxi $command [SUBCOMMAND] [OPTIONS] ARGUMENTS";
+    say "";
+    say $api->help($command);
+    exit 0;
+}
+
+# we have command and subcommand so lets handle parameters and dispatch
+
+my @extra_args;
+my %params;
+# Some commands can consume extra positional args, we strip them now
+# afterwards the first argument of ARGV should be something parsed
+# by GetOptions which leaves the extra parameters after "--" on ARGV
+while (@ARGV && substr($ARGV[0],0,1) ne '-') {
+    push @extra_args, shift;
+}
+
+# Create GetOption spec from the parameters recorded in the command
+if (my @getopts = $api->getopt_params($command, $subcommand)) {
+    TRACE('GetOptions parameters: ' . Dumper \@getopts);
+    GetOptions( \%params, @getopts ) || exit 1;
+}
+
+# reserved internal command parameters
+$params{positional_args} = \@extra_args if @extra_args;
+$params{payload} = \@ARGV if @ARGV;
+
+# TODO - Review if there is a better place for this
+my %auth_args;
+
+# For non-global commands the API injects 'realm' into the list of required parameters.
+# So if realm is present and set we put it into auth_args
+# NB: Realm argument for commands is pki_realm
+if ($params{realm}) {
+    DEBUG('Set command realm ' . $params{realm});
+    $auth_args{'pki_realm'} = $params{realm};
+}
+
+# Explicit auth key given
+if (my $keyfile = $opt{'auth-key'}) {
+    if (!-r $keyfile) {
+        LOGDIE('Unable to find/read keyfile at ' . $keyfile);
+    }
+    $auth_args{account_key} = $keyfile;
+
+# Explicit auth config
+} elsif ($opt{'auth-config'}) {
+
+
+} else {
+    my $keyfile = glob("~/.oxi/client.key");
+    # first try to autodetect the admin mode key file...
+    if ((not $opt{'no-caop'}) && -e $keyfile && -r $keyfile) {
+        $auth_args{account_key} = $keyfile;
+
+    # ...and second the user config file.
+    } else {
+
+    }
+}
+
+INFO('Enable operator mode using keyfile '. $auth_args{account_key})
+    if ($auth_args{account_key});
+
+my $client = OpenXPKI::Client::CLI->new(
+    authenticator => OpenXPKI::DTO::Authenticator->new(%auth_args)
+);
+$api->client($client);
+
+# Dispatch request
+TRACE "Command parameters: " . Dumper  \%params;
+my $res;
+try {
+    my $payload = $api->dispatch(
+        rel_namespace => $command,
+        command => $subcommand,
+        params => \%params,
+    );
+    $res = OpenXPKI::Client::API::Response->new(
+        payload => $payload,
+    );
+}
+catch ($err) {
+    $res = OpenXPKI::Client::API::Response->new(
+        payload => $err,
+        state => 400,
+    );
+}
+TRACE(Dumper $res);
+
+my $json = JSON::PP->new();
+if ($res->state == 200) {
+
+    my $out = $res->payload;
+    if (blessed $out) {
+        $out = $out->params();
+    }
+    if (ref $out eq '')  {
+        $out = OpenXPKI::i18n::i18nTokenizer($out);
+    } else {
+        $out = OpenXPKI::i18n::i18n_walk($out);
+    }
+    if ($opt{'json-pretty'}) {
+        print $json->pretty()->encode($out);
+    } elsif ($opt{'json'}) {
+        print $json->encode($out);
+    } else {
+        print YAML::Dump $out;
+    }
+    exit 0;
+
+}
+
+if (blessed $res->payload and $res->payload->isa('OpenXPKI::DTO::ValidationException')) {
+    ERROR(OpenXPKI::i18n::i18nTokenizer($res->payload->message));
+    exit 10;
+}
+
+# a simple plain error message
+if (ref $res->payload eq '') {
+    ERROR(OpenXPKI::i18n::i18nTokenizer($res->payload));
+    exit 10;
+}
+
+if (blessed $res->payload and $res->payload->isa('OpenXPKI::Exception')) {
+    # We assume that all OpenXPKI::Exceptions are already logged
+    exit 10;
+}
+
+ERROR(sprintf "Something went wrong (%d, %s)", $res->state, ref $res->payload);
+exit 255;
+
+=head1 NAME
+
+oxi - tool for managing OpenXPKI instances and artefacts
+
+=head1 USAGE
+
+oxi COMMAND [SUBCOMMAND] [OPTIONS] PARAMETER
+
+Type C<help> to get the list of available commands.
+
+Type the name of any command to get available subcommands.
+
+Type C<help E<lt>commandE<gt> [E<lt>subcommandE<gt>]> for detailed help
+on a command or subcommand.
+
+=head2 Global Options
+
+=over
+
+=item verbose|v
+
+raise loglevel to INFO, DEBUG (-vv) or TRACE (-vvv)
+
+=item json
+
+print output data as compact JSON structure
+
+=item json-pretty
+
+print output data as formated JSON structure
+
+=item auth-config|c
+
+path to a config file to read the authentication details from
+
+=item auth-key|k
+
+path to the login key to run command as ca operator
+
+the default location is ~/.oxi/client.key
+
+=item no-caop
+
+do not authenticate as ca operator and use the default user binding
+even if a ca operator key was autodetected.
+
+=item realm
+
+realm to run the command against, also used for authentication when
+not in ca operator mode.
+
+This option is not available on global commands.
+
+=back
+
+=cut
+
+1;

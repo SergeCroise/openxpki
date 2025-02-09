@@ -1,8 +1,9 @@
 #!/bin/bash
 # Install OpenXPKI
+set -euo pipefail
 
-ROOTDIR="$(dirname "$0")"; mountpoint -q /vagrant && ROOTDIR=/vagrant/assets
-. "$ROOTDIR/functions.sh"
+SCRIPTDIR="$(dirname "$0")"
+. "$SCRIPTDIR/functions.sh"
 
 #
 # Configure OpenXPKI
@@ -73,10 +74,10 @@ mkdir -p /var/www/openxpki
 chown $apache_user:$apache_user /var/www/openxpki
 
 # LOG FILES
-for f in scep.log soap.log webui.log rpc.log est.log; do
-    touch /var/log/openxpki/$f
-    chown $apache_user:openxpki /var/log/openxpki/$f
-    chmod 640 /var/log/openxpki/$f
+for f in webui acme certep cmc est rpc scep soap; do
+    touch /var/log/openxpki/${f}.log
+    chown $apache_user:openxpki /var/log/openxpki/${f}.log
+    chmod 660 /var/log/openxpki/${f}.log
 done
 
 # logrotate
@@ -98,3 +99,16 @@ echo "Install OpenXPKI from host sources"
 $OXI_SOURCE_DIR/tools/testenv/oxi-refresh --full 2>&1 | tee $LOG | sed -u 's/^/    /mg'
 
 set +e
+
+#
+# Helper scripts
+#
+tools_dir="$OXI_SOURCE_DIR/tools/testenv"
+if ! grep -q "$tools_dir" /root/.bashrc; then
+    echo "Set \$PATH and run 'oxi-help' on login"
+    echo "export PATH=\$PATH:$tools_dir" >> /root/.bashrc
+    if [[ -d /home/vagrant ]]; then
+        echo "export PATH=\$PATH:$tools_dir" >> /home/vagrant/.profile
+        echo "$tools_dir/oxi-help"           >> /home/vagrant/.profile
+    fi
+fi

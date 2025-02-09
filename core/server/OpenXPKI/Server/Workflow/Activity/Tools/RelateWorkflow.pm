@@ -1,10 +1,7 @@
 package OpenXPKI::Server::Workflow::Activity::Tools::RelateWorkflow;
+use OpenXPKI -base => 'OpenXPKI::Server::Workflow::Activity';
 
-use strict;
-use OpenXPKI::Exception;
-use base qw( OpenXPKI::Server::Workflow::Activity );
 use OpenXPKI::Server::Context qw( CTX );
-use OpenXPKI::Server::Database; # to get AUTO_ID
 use Workflow::Exception qw(configuration_error workflow_error);
 
 sub execute {
@@ -50,7 +47,7 @@ sub execute {
         }
     );
 
-    CTX('log')->application()->info('Register workflow with tag '.$name);
+    CTX('log')->application()->info("Register workflow with tag '$name'");
 
     return 1;
 
@@ -62,7 +59,7 @@ __END__
 
 =head1 Name
 
-OpenXPKI::Server::Workflow::Activity::Tools::RelateWorkflow;
+OpenXPKI::Server::Workflow::Activity::Tools::RelateWorkflow
 
 =head1 Description
 

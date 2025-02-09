@@ -1,12 +1,18 @@
 package OpenXPKI::Client::Config;
-use Moose;
+use OpenXPKI qw( -class -typeconstraints );
 
+# Core modules
 use File::Spec;
+
+# CPAN modules
 use Cache::LRU;
 use Config::Std;
-use Data::Dumper;
+use Log::Log4perl::MDC;
+
+# Project modules
 use OpenXPKI::Client;
 use OpenXPKI::Log4perl;
+use OpenXPKI::Log4perl::MojoLogger;
 use OpenXPKI::i18n qw( set_language set_locale_prefix);
 
 =head1 OpenXPKI::Client::Config
@@ -104,12 +110,15 @@ config file read but can also be set.
 
 =cut
 
-has 'logger' => (
-    required => 0,
-    lazy => 1,
+has 'log' => (
     is => 'rw',
-    isa => 'Object',
-    builder => '__init_logger',
+    isa => duck_type( [qw(
+           trace    debug    info    warn    error    fatal
+        is_trace is_debug is_info is_warn is_error is_fatal
+    )] ),
+    init_arg => undef,
+    lazy => 1,
+    default => sub ($self) { OpenXPKI::Log4perl->get_logger($self->log_facility) },
 );
 
 =head3 logconf
@@ -140,6 +149,18 @@ has 'logconf' => (
     }}
 );
 
+has 'log_facility' => (
+    is => 'ro',
+    isa => 'Str',
+    init_arg => undef,
+    lazy => 1,
+    default => sub ($self) {
+        $self->default->{logger}
+            ? 'openxpki.client.' . $self->service # the logger for this is defined in __init_log4perl()
+            : ($self->default->{global}->{log_facility} || '')
+    },
+);
+
 =head3 default
 
 Accessor to the default configuration, usually read from I<default.conf>.
@@ -152,35 +173,6 @@ has 'default' => (
     isa => 'HashRef',
     lazy => 1,
     builder => '__init_default',
-);
-
-=head3 endpoint
-
-Name of the endpoint that is used for config discovery, set from the
-script name when C<parse_uri> is called. Can also be set explicit.
-
-=cut
-
-has 'endpoint' => (
-    required => 0,
-    is => 'rw',
-    isa => 'Str|Undef',
-    lazy => 1,
-    default => '',
-);
-
-=head3 route
-
-The name of the route extracted from the script name by C<parse_uri>.
-
-=cut
-
-has 'route' => (
-    required => 0,
-    is => 'rw',
-    isa => 'Str',
-    lazy => 1,
-    default => '',
 );
 
 =head3 language
@@ -198,7 +190,7 @@ has language => (
     default => '',
     trigger => sub {
         my $self = shift;
-        set_language($self->language());
+        set_language($self->language);
     },
 );
 
@@ -236,17 +228,21 @@ around BUILDARGS => sub {
     my $orig = shift;
     my $class = shift;
 
-    my $args = shift;
-    if (!ref $args) {
-        $args = { service => $args };
+    my %args;
+    if (@_ == 1) {
+        if (ref $_[0]) {
+            %args = $_[0]->%*;
+        } else {
+            $args{service} = $_[0];
+        }
+    } else {
+        %args = @_;
     }
 
     # try to read service name from ENV
-    if ($ENV{OPENXPKI_CLIENT_SERVICE_NAME}) {
-        $args->{service} = $ENV{OPENXPKI_CLIENT_SERVICE_NAME};
-    }
+    $args{service} = $ENV{OPENXPKI_CLIENT_SERVICE_NAME} if $ENV{OPENXPKI_CLIENT_SERVICE_NAME};
 
-    return $class->$orig( $args );
+    return $class->$orig( %args );
 
 };
 
@@ -254,21 +250,17 @@ sub BUILD {
 
     my $self = shift;
 
-    if ($self->service() !~ /\A[a-zA-Z0-9\-]+\z/) {
-        die "Invalid service name: " . $self->service();
-    }
+    die "Invalid service name: " . $self->service unless $self->service =~ /\A[a-zA-Z0-9\-]+\z/;
 
-    my $config = $self->default();
+    my $config = $self->default;
 
-    if ($config->{global}->{locale_directory}) {
-        set_locale_prefix($config->{global}->{locale_directory});
-    }
-    if ($config->{global}->{default_language}) {
-        $self->language($config->{global}->{default_language});
-    }
+    set_locale_prefix($config->{global}->{locale_directory}) if $config->{global}->{locale_directory};
+    $self->language($config->{global}->{default_language}) if $config->{global}->{default_language};
 
-    $self->logger()->debug(sprintf('Config for service %s loaded', $self->service()));
-    $self->logger()->trace('Global config: ' . Dumper $config ) if $self->logger->is_trace;
+    $self->__init_log4perl;
+
+    $self->log->debug(sprintf("Config for service '%s' loaded", $self->service));
+    $self->log->trace('Global config: ' . Dumper $config ) if $self->log->is_trace;
 
 }
 
@@ -277,13 +269,13 @@ sub __init_basepath {
     my $self = shift;
 
     # generate name of the environemnt values from the service name
-    my $env_dir = 'OPENXPKI_'.uc($self->service()).'_CLIENT_CONF_DIR';
+    my $env_dir = 'OPENXPKI_'.uc($self->service).'_CLIENT_CONF_DIR';
     $env_dir =~ s{-}{_}g;
 
     # check for service specific basedir in env
     if ( $ENV{$env_dir} ) {
         -d $ENV{$env_dir}
-        || die sprintf "Explicit config directory not found (%s, from env %s)", $ENV{$env_dir}, $env_dir;
+            || die sprintf "Explicit config directory not found (%s from env %s)", $ENV{$env_dir}, $env_dir;
 
         return File::Spec->canonpath( $ENV{$env_dir} );
     }
@@ -292,25 +284,24 @@ sub __init_basepath {
     # check for a customized global base dir
     if ($ENV{OPENXPKI_CLIENT_CONF_DIR}) {
         $path = $ENV{OPENXPKI_CLIENT_CONF_DIR};
-        if (!-d $path) {
-            die "Explicit client config path does not exists! ($path)";
-        }
+        -d $path
+            || die "Explicit client config directory not found ($path from env OPENXPKI_CLIENT_CONF_DIR)";
         $path = File::Spec->canonpath( $path );
     } else {
         $path = '/etc/openxpki';
     }
 
     # default basedir is global path + servicename
-    return File::Spec->catdir( ( $path, $self->service() ) );
+    return File::Spec->catdir($path, $self->service);
 
 }
 
 sub __init_default {
 
     my $self = shift;
+
     # in case an explicit script name is set, we do NOT use the default.conf
-    my $service = $self->service();
-    my $env_file = 'OPENXPKI_'.uc($service).'_CLIENT_CONF_FILE';
+    my $env_file = 'OPENXPKI_'.uc($self->service).'_CLIENT_CONF_FILE';
 
     my $configfile;
     if ($ENV{$env_file}) {
@@ -339,68 +330,68 @@ sub __init_default {
 =head3 parse_uri
 
 Try to parse endpoint and route based on the script url in the
-environment. Always returns $self, endpoint is set to the empty
+environment. Returns ($endpoint, $route), but $endpoint is set to the empty
 string if parsing fails.
 
 =cut
 
-sub parse_uri() {
+sub parse_uri {
 
     my $self = shift;
+    my $service = $self->service;
 
-    # generate name of the environemnt values from the service name
-    my $service = $self->service();
-
-    $self->endpoint('');
-    $self->route('');
+    my $ep = '';
+    my $rt = '';
 
     # Test for specific config file based on script name
     # SCRIPT_URL is only available with mod_rewrite
     # expected pattern is servicename/endpoint/route,
     # route can contain a suffix like .exe which is used by some scep clients
-    my ($ep, $rt);
     if (defined $ENV{SCRIPT_URL}) {
         ($ep, $rt) = $ENV{SCRIPT_URL} =~ qr@ ${service} / ([^/]+) (?: / ([\w\-\/]+ (?:\.\w{3})? )? )?\z@x;
     } elsif (defined $ENV{REQUEST_URI}) {
-        ($ep,$rt) = $ENV{REQUEST_URI} =~ qr@ ${service} / ([^/\?]+) (?: / ([\w\-\/]+ (?:\.\w{3})? )? )? (\?.*)? \z@x;
+        ($ep, $rt) = $ENV{REQUEST_URI} =~ qr@ ${service} / ([^/\?]+) (?: / ([\w\-\/]+ (?:\.\w{3})? )? )? (\?.*)? \z@x;
     }
 
     if (!$ep) {
-        $self->logger()->warn("Unable to detect script name - please check the docs");
-        $self->logger()->trace(Dumper \%ENV) if $self->logger->is_debug;
+        $self->log->warn("Unable to detect script name - please check the docs");
+        $self->log->trace(Dumper \%ENV) if $self->log->is_trace;
+        return ('', '');
     } elsif (($service =~ m{(est|cmc)}) && !$rt) {
-        $self->logger()->debug("URI without endpoint, setting route: $ep");
-        $self->endpoint('default');
-        $self->route($ep);
+        $self->log->trace("URI without endpoint, setting route: $ep");
+        $rt = $ep;
+        $ep = 'default';
     } else {
-        $self->endpoint($ep);
-        $self->route($rt) if ($rt);
-        $self->logger()->debug("Parsed URI: $ep => ".($rt||''));
+        $self->log->trace("Parsed URI: $ep => ".($rt // '<undef>'));
     }
 
-    return $self;
+    # Populate the endpoint to the MDC
+    Log::Log4perl::MDC->put('endpoint', $ep);
+
+    return ($ep, $rt // '');
 
 }
 
-=head3 config
+=head3 endpoint_config
 
-Returns the config hashref for the current endpoint.
+Returns the config hashref for the given endpoint.
 
 =cut
 
-sub config() {
+sub endpoint_config {
 
     my $self = shift;
+    my $endpoint = shift;
+
     my $config;
-    my $cacheid = $self->endpoint() || 'default';
-    if (!($config = $self->_cache()->get( $cacheid ))) {
+    if (!($config = $self->_cache->get( $endpoint ))) {
         # non existing files and other errors are handled inside loader
-        $config = $self->__load_config();
-        $self->_cache()->set( $cacheid  => $config );
-        $self->logger()->debug('added config to cache ' . $cacheid);
+        $config = $self->__load_config($endpoint);
+        $self->_cache->set( $endpoint  => $config );
+        $self->log->debug('added config to cache ' . $endpoint);
     }
 
-    $self->language($config->{global}->{default_language} || $self->default()->{global}->{default_language} || '');
+    $self->language($config->{global}->{default_language} || $self->default->{global}->{default_language} || '');
 
     return $config;
 
@@ -409,77 +400,75 @@ sub config() {
 sub __load_config {
 
     my $self = shift;
+    my $endpoint = shift;
 
     my $file;
     my $config;
-    if ($self->endpoint()) {
+    if ($endpoint) {
         # config via socket
-        if ($self->has_client()) {
-            $self->logger()->debug('Autodetect config for service ' . $self->service() . ' via socket ');
-            my $reply = $self->client()->send_receive_service_msg('GET_ENDPOINT_CONFIG',
-                { 'interface' => $self->service(), endpoint => $self->endpoint() });
+        if ($self->has_client) {
+            $self->log->debug("Autodetect config for service '".$self->service."' via socket");
+            my $reply = $self->client->send_receive_service_msg(
+                GET_ENDPOINT_CONFIG => { interface => $self->service, endpoint => $endpoint }
+            );
             die "Unable to fetch endpoint default configuration from backend" unless (ref $reply->{PARAMS});
             return $reply->{PARAMS}->{CONFIG};
         }
-        $file = $self->endpoint().'.conf';
+        $file = "$endpoint.conf";
     }
 
     if ($file) {
-        $self->logger()->debug('Autodetect config file for service ' . $self->service() . ': ' . $file );
-        $file = File::Spec->catfile( ($self->basepath() ), $file );
+        $self->log->debug("Autodetect config file for service '".$self->service."': $file");
+        $file = File::Spec->catfile( $self->basepath, $file );
         if (! -f $file ) {
-            $self->logger()->debug('No config file found, falling back to default');
+            $self->log->debug('No config file found, falling back to default');
             $file = undef;
         }
     }
 
     # if no config file is given, use the default
-    return $self->default() unless($file);
+    return $self->default unless($file);
 
     if (!read_config $file => $config) {
-        $self->logger()->error('Unable to read config from file ' . $file);
+        $self->log->error('Unable to read config from file ' . $file);
         die "Could not read client config file $file ";
     }
 
     # cast to an unblessed hash
     my %config = %{$config};
 
-    $self->logger()->trace('Script config: ' . Dumper \%config ) if $self->logger->is_trace;
+    $self->log->trace('Script config: ' . Dumper \%config ) if $self->log->is_trace;
 
     return \%config;
 }
 
-sub __init_logger {
+sub __init_log4perl {
     my $self = shift;
-    my $config = $self->default();
 
     # if no logger section was found we use the log settings from global
     # if those are also missing this falls back to a SCREEN appender
-    if (!$config->{logger}) {
-        OpenXPKI::Log4perl->init_or_fallback( $config->{global}->{log_config} );
-        return Log::Log4perl->get_logger($config->{global}->{log_facility} || '');
-    }
+    return OpenXPKI::Log4perl->init_or_fallback( $self->default->{global}->{log_config} )
+      unless $self->default->{logger};
 
     # logger section is merged with the default config from the class
     my $conf = {
-        %{$self->logconf()},
-        %{$config->{logger}}
+        %{$self->logconf},
+        %{$self->default->{logger}}
     };
 
     # extract the loglevel from the config hash
     my $loglevel = uc($conf->{log_level}) || 'WARN';
     delete $conf->{log_level};
 
-    # facility is constructed from service
-    my $log_facility = 'client.'.$self->service();
-
     # fill in the service name into the filename pattern
-    $conf->{filename} = sprintf($conf->{filename}, $self->service());
+    $conf->{filename} = sprintf($conf->{filename}, $self->service);
 
     # add the MDC part to the conversion pattern in case it is not set (empty [] in string)
     if ($conf->{'layout.ConversionPattern'} && $conf->{'layout.ConversionPattern'} =~ m{\[\]}) {
-        if ($self->service() eq 'webui') {
+        if ($self->service eq 'webui') {
             $conf->{'layout.ConversionPattern'} =~ s{\[\]}{[pid=%P|sid=%X{sid}]};
+        } elsif($loglevel =~ m{DEBUG|TRACE}) {
+            $conf->{'layout.ConversionPattern'} =~ s{\[\]}{[pid=%P|%i]};
         } else {
             $conf->{'layout.ConversionPattern'} =~ s{\[\]}{[pid=%P|ep=%X{endpoint}]};
         }
@@ -487,16 +476,14 @@ sub __init_logger {
 
     # assemble the final hash
     my $log_config = {
-        "log4perl.category.$log_facility" => "$loglevel, Logfile",
-        'log4perl.appender.Logfile'       => 'Log::Log4perl::Appender::File',
+        'log4perl.category.' . $self->log_facility => "$loglevel, Logfile",
+        'log4perl.appender.Logfile' => 'Log::Log4perl::Appender::File',
     };
     map {
         $log_config->{'log4perl.appender.Logfile.'.$_} = $conf->{$_};
     } keys %{$conf};
 
-    OpenXPKI::Log4perl->init_or_fallback( $log_config );
-    return Log::Log4perl->get_logger( $log_facility );
-
+    return OpenXPKI::Log4perl->init_or_fallback( $log_config );
 }
 
 __PACKAGE__->meta->make_immutable;

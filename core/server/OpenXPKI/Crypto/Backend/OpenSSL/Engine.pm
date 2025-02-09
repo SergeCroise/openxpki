@@ -57,7 +57,7 @@ sub new {
     return $self;
 }
 
-sub __set_engine_params() {
+sub __set_engine_params {
     # set special engine parameters in child classes
     my $self = shift;
     my $keys = shift;
@@ -193,6 +193,8 @@ sub get_key_info
     my $self = shift;
     return {
         'key_name' => $self->{KEY},
+        'key_cert' => $self->{CERT},
+        'key_engine' => $self->get_engine() || 'none',
         'key_store' => $self->{KEY_STORE},
         'key_secret' => ($self->get_passwd() ? 1 : 0),
         'key_usable' => ($self->key_usable()  ? 1 : 0),
@@ -236,6 +238,13 @@ sub get_keyfile
     }
 
     return $self->{KEY};
+}
+
+# New method to get internal key object for token layer migration
+# to keep it easy we just return undef here if this is not supported
+sub get_key_object
+{
+    return;
 }
 
 sub get_passwd

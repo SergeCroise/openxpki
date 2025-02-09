@@ -1,5 +1,6 @@
 import { tracked } from '@glimmer/tracking'
-import Base from './base';
+import { debug } from '@ember/debug'
+import Base from './base'
 
 /*
  * Form field data:
@@ -9,8 +10,8 @@ import Base from './base';
  * implementations oxi-section/form/field/* via @content.
  */
 export default class Field extends Base {
-    static get _type() { return 'app/data/field' }
-    static get _idField() { return 'name' }
+    static _type = 'app/data/field'
+    static _idField = 'name'
 
     /*
      * Common
@@ -18,13 +19,16 @@ export default class Field extends Base {
     type
     name
     _refName // internal use: original name, needed for dynamic input fields where 'name' can change
+    _id = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER) // internal use: random ID
     value
     label
     is_optional
     tooltip
     placeholder
+    width
     actionOnChange
-    @tracked _error // client- or server-side error state
+    @tracked _error         // client-side error state
+    @tracked _server_error  // server-side error state
     autofill
     ecma_match
     /*
@@ -49,9 +53,9 @@ export default class Field extends Base {
     /*
      * oxisection/form/field/select
      */
-    options
-    prompt
+    options = []
     editable
+    _guardian        // reference to the parent Field object (if current field is a dependant)
     /*
      * oxisection/form/field/static
      */
@@ -65,4 +69,36 @@ export default class Field extends Base {
      */
     rows
     allow_upload
+
+
+    /**
+     * `true` if this field contains any definition of dependent fields.
+     * Currently only supported for `type == "select"`.
+     * @memberOf Field
+     */
+    get hasDependants() {
+        if (this.type != 'select') return false
+        for (const opt of this.options) {
+            if (opt.dependants) return true
+        }
+        return false
+    }
+
+    validate() {
+        if (this.editable && this.hasDependants) {
+            debug(`${this.constructor.name} instance "${this[this.constructor._idField] ?? '<unknown>'}": attribute "enabled" cannot be set while field has dependants.`)
+            this.editable = false
+        }
+    }
+
+    /**
+     * Clones the object and returns a new instance with the same properties
+     * except for the `_id` which gets a new random value.
+     * @memberOf Field
+     */
+    clone() {
+        let cloneField = super.clone()
+        cloneField._id = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER)
+        return cloneField
+    }
 }

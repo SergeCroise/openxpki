@@ -1,0 +1,27 @@
+{{#if this.isString}}
+    <div class={{@class}}>
+    {{#if @raw}}
+        {{defuse @value}}
+    {{else}}
+        {{@value}}
+    {{/if}}
+    </div>
+{{else}}
+    <BsButton
+        @onClick={{this.toggleDetails}}
+        @type=""
+        class="btn-sm btn-light border-secondary"
+    >
+        [{{this.type}}]
+        {{#if this.detailsOpen}}
+            <span class="glyphicon glyphicon-triangle-bottom"></span>
+        {{else}}
+            <span class="glyphicon glyphicon-triangle-right"></span>
+        {{/if}}
+    </BsButton>
+    {{#if this.detailsOpen}}
+        <div class="card card-body bg-light">
+            <pre class="text-prewrap {{@class}}">{{this.asJSON}}</pre>
+        </div>
+    {{/if}}
+{{/if}}

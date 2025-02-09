@@ -1,5 +1,5 @@
 package OpenXPKI::Client::Simple;
-use Moose;
+use OpenXPKI -class;
 
 =head1 NAME
 
@@ -13,67 +13,22 @@ given auth info on each new instance (subsequent commands within one call
 are run on the same session). If you pass (and maintain) a session object to
 the constructor, it is used to persist the backend session during requests.
 
-=head1 CONSTRUCTION
-
-The client is constructed calling the new method, the required configuration
-can be set via one of three options:
-
-=head2 Explicit Config
-
-Pass the configuration as hash to the new method, must set at least
-I<config.socket> and I<config.realm> (omit if server has only one realm).
-
-The default authentication is anonymous but can be overidden by setting
-I<auth.stack> and appropriate keys for the chosen login method.
-
-An instance of Log4perl can be passed via I<logger>, default is to log to
-STDERR with loglevel error.
-
-=head2 Explicit Config from File
-
-Pass the name of the config file to use as string to the new method, the
-file must be in the standard config ini format and have at least a section
-I<global> providing I<socket> and I<realm>.
-
-If an I<auth> section exists, it is mapped as is to the I<auth> parameter.
-
-You can set a loglevel and logfile location using I<log.file> and
-I<log.level>. Loglevel must be a Log4perl Level name without the leading
-dollar sign (e.g. level=DEBUG).
-
-=head2 Implicit Config from File
-
-If you do not pass a I<config> argument to the new method, the class tries
-to find a config file at
-
-=over
-
-=item string set in the environment OPENXPKI_CLIENT_CONF
-
-=item $HOME/.openxpki.conf
-
-=item /etc/openxpki/client.conf
-
-=back
-
-The same rules as above apply, in case you pass auth or logger as explicit
-arguments the settings in the file are ignored.
-
 =cut
 
-use English;
-use POSIX qw( strftime );
+# Core modules
 use Getopt::Long;
 use Pod::Usage;
-use Data::Dumper;
-use Config::Std;
 use File::Spec;
-use OpenXPKI::Client;
-use OpenXPKI::Serialization::Simple;
+
+# CPAN modules
+use Config::Std;
 use Log::Log4perl qw(:easy :levels);
 use Log::Log4perl::Level;
 
-use Data::Dumper;
+# Project modules
+use OpenXPKI::Client;
+use OpenXPKI::Serialization::Simple;
+
 
 has auth => (
     is => 'rw',
@@ -103,14 +58,14 @@ has 'realm' => (
     is => 'ro',
     isa => 'Str',
     lazy => 1,
-    default  => sub { my $self = shift; return $self->_config()->{'realm'} }
+    default  => sub ($self) { $self->_config->{'realm'} },
 );
 
 has 'socket' => (
     is => 'ro',
     isa => 'Str',
     lazy => 1,
-    default  => sub { my $self = shift; return $self->_config()->{'socket'} }
+    default  => sub ($self) { $self->_config->{'socket'} },
 );
 
 has client => (
@@ -124,10 +79,14 @@ has client => (
 has logger => (
     is => 'rw',
     isa => 'Object',
-    builder  => '_build_logger',
     init_arg => 'logger',
     lazy => 1,
+    builder  => '_build_logger',
 );
+sub _build_logger {
+    Log::Log4perl->easy_init($ERROR) unless Log::Log4perl->initialized;
+    return Log::Log4perl->get_logger;
+};
 
 has last_reply => (
     is => 'rw',
@@ -141,14 +100,52 @@ has last_error => (
     default => undef,
 );
 
-sub _build_logger {
-    if(!Log::Log4perl->initialized()) {
-        Log::Log4perl->easy_init($ERROR);
-    }
-    return Log::Log4perl->get_logger();
-};
-
 =head1 METHODS
+
+=head2 new
+
+The required configuration can be set via one of three options:
+
+=head3 Explicit Config
+
+Pass the configuration as hash to the new method, must set at least
+I<config.socket> and I<config.realm> (omit if server has only one realm).
+
+The default authentication is anonymous but can be overidden by setting
+I<auth.stack> and appropriate keys for the chosen login method.
+
+An instance of Log4perl can be passed via I<logger>, default is to log to
+STDERR with loglevel error.
+
+=head3 Explicit Config from File
+
+Pass the name of the config file to use as string to the new method, the
+file must be in the standard config ini format and have at least a section
+I<global> providing I<socket> and I<realm>.
+
+If an I<auth> section exists, it is mapped as is to the I<auth> parameter.
+
+You can set a loglevel and logfile location using I<log.file> and
+I<log.level>. Loglevel must be a Log4perl Level name without the leading
+dollar sign (e.g. level=DEBUG).
+
+=head3 Implicit Config from File
+
+If you do not pass a I<config> argument to the new method, the class tries
+to find a config file at
+
+=over
+
+=item string set in the environment OPENXPKI_CLIENT_CONF
+
+=item $HOME/.openxpki.conf
+
+=item /etc/openxpki/client.conf
+
+=back
+
+The same rules as above apply, in case you pass auth or logger as explicit
+arguments the settings in the file are ignored.
 
 =cut
 
@@ -265,7 +262,7 @@ sub _build_client {
             $log->trace("Realms found:" . Dumper (keys %{$reply->{PARAMS}->{PKI_REALMS}}));
             die "No realm specified";
         }
-        $log->debug("Selecting realm $realm");
+        $log->debug("Selecting realm '$realm'");
         my $auth = $self->auth();
         $reply = $client->send_receive_service_msg('GET_PKI_REALM',{
             PKI_REALM => $realm,
@@ -354,6 +351,9 @@ sub _build_client {
         my $data;
         # no configuration defined yet
         if ($login_type eq 'X509') {
+            OpenXPKI::Exception::Authentication->throw(
+                message => 'I18N_OPENXPKI_UI_ENDPOINT_REQUIRES_TLS_CLIENT_AUTHENTICATION'
+            ) unless ($ENV{SSL_CLIENT_CERT});
             $data->{certificate} = $ENV{SSL_CLIENT_CERT};
             my @chain;
             # larger chains are very unlikely and we dont support stupid clients
@@ -425,13 +425,6 @@ sub __jwt_signature {
 
 }
 
-
-sub run_legacy_command {
-    my $self = shift;
-    my $command = shift;
-    die "run_legacy_command is no longer supported (command $command)";
-}
-
 sub run_command {
 
     my $self = shift;
@@ -441,7 +434,7 @@ sub run_command {
 
     die "run_command must be called with API version 2 ($command / $api)" if ($api != 2);
 
-    my $reply = $self->client()->send_receive_service_msg('COMMAND', {
+    my $reply = $self->client->send_receive_service_msg('COMMAND', {
         COMMAND => $command,
         PARAMS => $params,
         API => $api
@@ -450,19 +443,18 @@ sub run_command {
     $self->last_reply( $reply );
     if ($reply->{SERVICE_MSG} ne 'COMMAND') {
         my $message;
-        if (my $err = $reply->{'ERROR'}) {
+        if (my $err = $reply->{ERROR}) {
             if ($err->{PARAMS} && $err->{PARAMS}->{__ERROR__}) {
                 $message = $err->{PARAMS}->{__ERROR__};
             } elsif($err->{LABEL}) {
                 $message = $err->{LABEL};
             }
         } else {
-            $message = 'unknown error';
+            $message = "Unknown error when trying to run command '$command'";
         }
-        $self->logger()->error($message);
-        $self->logger()->trace(Dumper $reply) if $self->logger->is_trace;
+        $self->logger->trace("Server error when trying to run '$command'. Reply was: " . Dumper $reply) if $self->logger->is_trace;
         $self->last_error($message);
-        die "Error running command: $message";
+        die "$message\n";
     }
     $self->last_error('');
     return $reply->{PARAMS};
@@ -524,59 +516,52 @@ sub handle_workflow {
         $wf_params = $params->{PARAMS};
     }
 
+    my $run_and_check = sub {
+        my $cmd = shift;
+        my $params = shift;
+
+        my $reply = $self->run_command($cmd, $params);
+        die "'$cmd' did not return a workflow object" unless ($reply and $reply->{workflow});
+
+        return $reply;
+    };
+
     if ($wf_action && $wf_id) {
 
-        $self->logger()->info(sprintf('execute workflow action %s on %01d', $wf_action, $wf_id));
-        $self->logger()->trace('workflow params:  '. Dumper $wf_params) if $self->logger->is_trace;
-        $reply = $self->run_command('execute_workflow_activity',{
+        $self->logger->info(sprintf("Execute workflow action '%s' on #%s", $wf_action, $wf_id));
+        $self->logger->trace('Workflow params:  '. Dumper $wf_params) if $self->logger->is_trace;
+        $reply = $run_and_check->( execute_workflow_activity => {
             id => $wf_id,
             activity => $wf_action,
             params => $wf_params,
         });
 
-        if (!$reply || !$reply->{workflow}) {
-            $self->logger()->fatal("No workflow object received after execute!");
-            die "No workflow object received!";
-        }
-
-        $self->logger()->debug('new Workflow State: ' . $reply->{workflow}->{state});
+        $self->logger->debug('New workflow state: ' . $reply->{workflow}->{state});
 
     } elsif ($wf_id) {
 
-        $self->logger()->debug(sprintf('request for workflow info on %01d', $wf_id));
+        $self->logger->debug(sprintf('Request for workflow info on #%s', $wf_id));
 
-        $reply = $self->run_command('get_workflow_info',{
+        $reply = $run_and_check->( get_workflow_info => {
             id => $wf_id,
         });
 
-        if (!$reply || !$reply->{workflow}) {
-            $self->logger()->fatal("No workflow object received after execute!");
-            die "No workflow object received!";
-        }
-
-        $self->logger()->trace(Dumper $reply->{workflow});
+        $self->logger->trace(Dumper $reply->{workflow}) if $self->logger->is_trace;
 
     } elsif ($wf_type) {
-        $reply = $self->run_command('create_workflow_instance',{
+        $reply = $run_and_check->( create_workflow_instance => {
             workflow => $wf_type,
             params => $wf_params,
             ($params->{use_lock} ? (use_lock => $params->{use_lock}) : ()),
         });
 
-        if (!$reply || !$reply->{workflow}) {
-            $self->logger()->fatal("No workflow object received after create!");
-            die "No workflow object received!";
-        }
-
-        $self->logger()->debug(sprintf('Workflow created (ID: %d), State: %s',
-            $reply->{workflow}->{id}, $reply->{workflow}->{state}));
+        $self->logger->debug(sprintf('Workflow "%s" created: id #%s, state "%s"',
+            $wf_type, $reply->{workflow}->{id}, $reply->{workflow}->{state}));
 
     } else {
-        $self->logger()->fatal("Neither workflow id nor type given");
+        $self->logger->fatal("Neither workflow id nor type given");
         die "Neither workflow id nor type given";
     }
-
-    $self->logger()->trace('Result of workflow action: ' . Dumper $reply) if $self->logger->is_trace;
 
     my $ret = $reply->{workflow};
     if ($return_uppercase) {
@@ -597,7 +582,7 @@ sub disconnect {
 
     my $self = shift;
 
-    $self->logger()->info('Disconnect client');
+    $self->logger()->debug('Disconnect client');
 
     # Use detach if an external session was provided
     # otherwise the session will be terminated!

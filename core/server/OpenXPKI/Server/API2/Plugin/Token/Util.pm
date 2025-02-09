@@ -13,12 +13,15 @@ related API methods
 # Project modules
 use OpenXPKI::Debug;
 use OpenXPKI::Server::Context qw( CTX );
-use OpenXPKI::MooseParams;
 
 # CPAN modules
-use Try::Tiny;
+use Type::Params qw( signature_for );
 
+# Feature::Compat::Try should be done last to safely disable warnings
+use Feature::Compat::Try;
 
+# should be done after imports to safely disable warnings in Perl < 5.36
+use experimental 'signatures';
 
 =head2 is_token_usable
 
@@ -27,15 +30,17 @@ Checks if the given token (I<OpenXPKI::Crypto::API>) is usable by doing an encry
 Returns C<1> if everything went fine, C<undef> otherwise.
 
 =cut
-sub is_token_usable {
-    my ($self, $token, $check) = positional_args(\@_, # OpenXPKI::MooseParams
-        { isa => 'OpenXPKI::Crypto::API' },
-        { isa => 'Str', default => 'sign' },
-    );
-
+signature_for is_token_usable => (
+    method => 1,
+    positional => [
+        'OpenXPKI::Crypto::API',
+        'Str', { default => 'sign' },
+        'HashRef|Undef', { default => undef },
+    ],
+);
+sub is_token_usable ($self, $token, $check, $padding_config) {
     ##! 1: 'start'
-    my $result = try {
-
+    try {
         CTX('log')->application()->debug("Check if token is usable using $check operation");
 
         ##! 64: 'Entering test'
@@ -55,7 +60,14 @@ sub is_token_usable {
 
         } elsif ($check eq 'encrypt') {
 
-            my $encrypted = $token->command({ COMMAND => 'pkcs7_encrypt', CONTENT => $base });
+            # Padding is only supported for pkcs7_encrypt for now
+            my %PADDING;
+            if ($padding_config && ($padding_config->{mode}//'') eq 'oaep') {
+                $PADDING{PADDING} = 'oaep';
+                $PADDING{PADDING_OPTIONS} = $padding_config // {};
+            }
+
+            my $encrypted = $token->command({ COMMAND => 'pkcs7_encrypt', CONTENT => $base, %PADDING });
             my $decrypted = $token->command({ COMMAND => 'pkcs7_decrypt', PKCS7 => $encrypted });
 
             ##! 16: "pkcs7 roundtrip done"
@@ -74,18 +86,17 @@ sub is_token_usable {
         }
         return 1;
     }
-    catch {
+    catch ($err) {
         ##! 8: 'pkcs7 roundtrip failed'
         return undef;
-    };
-
-    return $result;
+    }
 }
 
 =head2 validity_to_epoch
 
 Converts a I<HashRef> with a validity interval given as L<DateTime> objects into
-a I<HashRef> with Unix epoch timestamps.
+a I<HashRef> with Unix epoch timestamps. Values that are already Integers are
+passed through.
 
 Expects undef or DateTime objects in a HashRef like this:
 
@@ -102,17 +113,24 @@ and converts it to:
     }
 
 =cut
+
 sub validity_to_epoch {
     my ($self, $validity) = @_;
     my $result = {};
 
     for my $key (qw(notbefore notafter) ) {
         my $value = $validity->{$key};
-        OpenXPKI::Exception->throw(
-            message => "Values in 'validity' must be specified as DateTime object (or set to 'undef')",
-            params => { key => uc($key), type => blessed($value) },
-        ) unless (not defined $value or (defined blessed($value) and $value->isa('DateTime')));
-        $result->{$key} = $value ? $value->epoch : time;
+        if (not defined $value) {
+            $value = time
+        } elsif (blessed($value) and $value->isa('DateTime')) {
+            $value = $value->epoch
+        } elsif (ref $value ne '' || $value !~ m{\A\d+\z}) {
+            OpenXPKI::Exception->throw(
+                message => "Values in 'validity' must be specified as DateTime object, Integer or set to 'undef'",
+                params => { key => uc($key), type => ref $value },
+            )
+        }
+        $result->{$key} = $value;
     }
 
     return $result;

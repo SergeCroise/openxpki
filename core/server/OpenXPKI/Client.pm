@@ -122,18 +122,18 @@ sub __build_socket {
     ##! 4: "socket..."
     my $socket;
     if (! socket($socket, PF_UNIX, SOCK_STREAM, 0)) {
-    OpenXPKI::Exception->throw(
-        message => "I18N_OPENXPKI_CLIENT_INIT_CONNECTION_NO_SOCKET",
+        OpenXPKI::Exception::Socket->throw(
+            message => 'Unable to initialize socket',
+            socket => $self->socketfile(),
         );
     }
     ##! 4: "connect..."
     if (! connect($socket, sockaddr_un($self->socketfile()))) {
-    OpenXPKI::Exception->throw(
-        message => "I18N_OPENXPKI_CLIENT_INIT_CONNECTION_FAILED",
-        params  => {
-            SOCKETFILE => $self->socketfile(),
-            ERROR      => $!,
-        });
+        OpenXPKI::Exception::Socket->throw(
+            message => 'Unable to connect socket',
+            socket => $self->socketfile(),
+            error      => $!,
+        );
     }
     ##! 4: "finished"
     return $socket;
@@ -154,8 +154,9 @@ sub __build_channel {
     ##! 8: "evaluate answer"
     if ($msg !~ /^OK/) {
         ##! 16: "transport protocol was not accepted by server - $msg"
-        OpenXPKI::Exception->throw(
-            message => "I18N_OPENXPKI_CLIENT_INIT_TRANSPORT_PROTOCOL_REJECTED",
+        OpenXPKI::Exception::Socket->throw(
+            message => 'Transport protocol was not accepted by server',
+            socket => $self->socketfile(),
         );
     }
 
@@ -175,8 +176,9 @@ sub __build_channel {
 
     ##! 8: "evaluate answer"
     if ($msg !~ /^OK/) {
-        OpenXPKI::Exception->throw(
-            message => "I18N_OPENXPKI_CLIENT_INIT_SERIALIZATION_PROTOCOL_REJECTED",
+        OpenXPKI::Exception::Socket->throw(
+            message => 'Serialization protocol was not accepted by server',
+            socket => $self->socketfile(),
         );
     }
 
@@ -189,8 +191,10 @@ sub __build_channel {
     $msg = $self->_serializer()->deserialize( $channel->read() );
 
     if ($msg ne "OK") {
-        OpenXPKI::Exception->throw(
-            message => "I18N_OPENXPKI_CLIENT_INIT_SERVICE_PROTOCOL_REJECTED",
+        OpenXPKI::Exception::Socket->throw(
+            message => 'Service protocol was not accepted by server',
+            socket => $self->socketfile(),
+            params => { service => $self->service() }
         );
     }
 
@@ -206,20 +210,22 @@ sub talk {
 
     my $msg  = shift;
 
+    # for whatever reason using try/catch here does NOT behave like the
+    # eval construct and causes the session reinit to end in an endless loop
     eval {
         $self->_channel()->write(
             $self->_serializer()->serialize($msg)
         );
     };
 
-    if ($EVAL_ERROR) {
-        OpenXPKI::Exception->throw(
+    if (my $error = $EVAL_ERROR) {
+        OpenXPKI::Exception::Socket->throw(
             message => 'Error while writing to socket',
-            params  => {
-                EVAL_ERROR => $EVAL_ERROR,
-            },
+            socket => $self->socketfile(),
+            error  => $error,
         );
     }
+
 
     my $result;
     my $sh = set_sig_handler('ALRM', sub {
@@ -239,12 +245,12 @@ sub talk {
     );
     sig_alarm( 0 );
 
-    if (my $eval_err = $EVAL_ERROR) {
-        OpenXPKI::Exception->throw(
+    # TODO - is this ever fired ?
+    if (my $error = $EVAL_ERROR) {
+        OpenXPKI::Exception::Socket->throw(
             message => 'Error while reading from socket',
-            params  => {
-                EVAL_ERROR => $eval_err,
-            },
+            socket => $self->socketfile(),
+            error  => $error,
         );
     }
     ##! 4: Dumper $result

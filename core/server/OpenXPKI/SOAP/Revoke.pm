@@ -14,7 +14,7 @@ use OpenXPKI::Serialization::Simple;
 
 use Log::Log4perl;
 
-my $log = $main::config->logger();
+my $log = $main::config->log();
 
 $log->info("SOAP interface NG initialized ");
 
@@ -25,7 +25,7 @@ sub __dispatch_revoke {
     my $class   = shift;
     my $arg     = shift;
 
-    my $config = $main::config->config();
+    my $config = $main::config;
 
     my $client_ip   = $ENV{REMOTE_ADDR};    # dotted quad
     my $server_name = $ENV{SERVER_NAME};    # ca.company.com
